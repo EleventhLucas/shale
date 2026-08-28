@@ -8,9 +8,16 @@ export const participantSchema = z.object({
   active: z.boolean(),
 });
 
+export const defaultTagColor = "#6b6b68";
+export const tagColorSchema = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/, "Choose a valid six-digit hex color.")
+  .transform((color) => color.toLowerCase());
+
 export const tagSchema = z.object({
   id: idSchema,
   name: z.string().trim().min(1).max(40),
+  color: tagColorSchema,
   revision: z.number().int().positive(),
 });
 
@@ -89,10 +96,12 @@ export const moveCardInputSchema = z.object({
 
 export const createTagInputSchema = z.object({
   name: z.string().trim().min(1).max(40),
+  color: tagColorSchema.optional().default(defaultTagColor),
 });
 
 export const updateTagInputSchema = z.object({
   name: z.string().trim().min(1).max(40),
+  color: tagColorSchema,
   revision: z.number().int().positive(),
 });
 
@@ -131,6 +140,7 @@ export const invalidationEventSchema = z.object({
 
 export type Participant = z.infer<typeof participantSchema>;
 export type Tag = z.infer<typeof tagSchema>;
+export type TagColor = z.infer<typeof tagColorSchema>;
 export type TrashItem = z.infer<typeof trashItemSchema>;
 export type TrashItemType = z.infer<typeof trashItemTypeSchema>;
 export type Card = z.infer<typeof cardSchema>;

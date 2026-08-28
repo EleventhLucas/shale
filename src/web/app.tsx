@@ -22,7 +22,6 @@ import {
   Check,
   ChevronLeft,
   CircleUserRound,
-  GripHorizontal,
   LockKeyhole,
   Menu,
   Moon,
@@ -35,17 +34,77 @@ import {
   UnlockKeyhole,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import type { BoardSnapshot, Card, Column, Participant, Tag, TrashItem } from "../shared/contracts";
+import type {
+  BoardSnapshot,
+  Card,
+  Column,
+  Participant,
+  Tag,
+  TagColor,
+  TrashItem,
+} from "../shared/contracts";
+import { defaultTagColor } from "../shared/contracts";
 import { ApiError, api } from "./api";
 import { Button } from "./components/button";
 
 const participantStorageKey = "shale.participant";
 const themeStorageKey = "shale.theme";
+const tagColorOptions: Array<{ value: TagColor; label: string }> = [
+  { value: defaultTagColor, label: "Gray" },
+  { value: "#c15b53", label: "Red" },
+  { value: "#b87d26", label: "Amber" },
+  { value: "#4f8a62", label: "Green" },
+  { value: "#4f78b8", label: "Blue" },
+  { value: "#8064b2", label: "Violet" },
+];
+
+function tagColorStyle(color: TagColor): CSSProperties {
+  return { "--tag-color": color } as CSSProperties;
+}
+
+function TagColorField({
+  color,
+  label,
+  onChange,
+}: {
+  color: TagColor;
+  label: string;
+  onChange: (color: TagColor) => void;
+}) {
+  const preset = tagColorOptions.some((option) => option.value === color) ? color : "custom";
+
+  return (
+    <div className="tag-color-field">
+      <input
+        className="tag-color-input"
+        type="color"
+        value={color}
+        aria-label={`${label}: custom color`}
+        title="Choose any color"
+        onChange={(event) => onChange(event.target.value as TagColor)}
+      />
+      <select
+        value={preset}
+        aria-label={`${label}: color preset`}
+        onChange={(event) => {
+          if (event.target.value !== "custom") onChange(event.target.value as TagColor);
+        }}
+      >
+        <option value="custom">Custom</option>
+        {tagColorOptions.map((option) => (
+          <option value={option.value} key={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 function useRealtime(): void {
   const queryClient = useQueryClient();
@@ -305,7 +364,7 @@ function BoardPage({
     <div className={`app-shell ${navOpen ? "app-shell--nav" : ""}`}>
       <aside className="sidebar" aria-label="Workspace navigation">
         <div className="brand-row">
-          <img className="brand-mark" src="/shale-mark.png" alt="" />
+          <img className="brand-mark" src="/shale-mark.svg" alt="" />
           <span>SHALE</span>
         </div>
         <div className="workspace-heading">Workspaces</div>
@@ -551,26 +610,21 @@ function BoardColumn({
 }
 
 function SortableCardTile({ card, onOpen }: { card: Card; onOpen: () => void }) {
-  const { attributes, isDragging, listeners, setActivatorNodeRef, setNodeRef, transform } =
-    useSortable({ id: card.id, data: { type: "card", columnId: card.columnId } });
+  const { attributes, isDragging, listeners, setNodeRef, transform } = useSortable({
+    id: card.id,
+    data: { type: "card", columnId: card.columnId },
+  });
+  const sortableAttributes = { ...attributes, role: undefined };
 
   return (
     <article
       className={`card-tile ${isDragging ? "card-tile--dragging" : ""}`}
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform) }}
+      {...sortableAttributes}
+      {...listeners}
+      aria-label={`${card.title}. Press Space to pick up and move this card.`}
     >
-      <button
-        className="card-grab-area"
-        type="button"
-        ref={setActivatorNodeRef}
-        aria-label={`Drag ${card.title}`}
-        {...attributes}
-        {...listeners}
-      >
-        <GripHorizontal size={16} />
-        <span className="sr-only">Drag card</span>
-      </button>
       <button className="card-open" type="button" onClick={onOpen}>
         <CardContent card={card} />
       </button>
@@ -583,7 +637,7 @@ function CardContent({ card }: { card: Card }) {
     <>
       <div className="tag-row">
         {card.tags.map((tag) => (
-          <span className="tag" key={tag.id}>
+          <span className="tag" style={tagColorStyle(tag.color)} key={tag.id}>
             {tag.name}
           </span>
         ))}
@@ -874,7 +928,7 @@ function CardTagPicker({
       <h3>Tags</h3>
       <div className="drawer-tags">
         {card.tags.map((tag) => (
-          <span className="tag tag--removable" key={tag.id}>
+          <span className="tag tag--removable" style={tagColorStyle(tag.color)} key={tag.id}>
             {tag.name}
             <button
               type="button"
@@ -915,16 +969,116 @@ function CardTagPicker({
                     if (details) details.open = false;
                   }}
                 >
+                  <i
+                    className="tag-color-dot"
+                    style={tagColorStyle(tag.color)}
+                    aria-hidden="true"
+                  />
                   {tag.name}
                 </button>
               ))}
-              {available.length === 0 && <span>No matching tags</span>}
+              {available.length === 0 && <span className="tag-picker-empty">No matching tags</span>}
             </div>
           </div>
         </details>
       </div>
       {assign.error && <p className="form-error">{assign.error.message}</p>}
     </section>
+  );
+}
+
+function TagManagerRow({
+  tag,
+  boardKey,
+  participant,
+}: {
+  tag: Tag;
+  boardKey: string[];
+  participant?: Participant;
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState(tag.name);
+  const [color, setColor] = useState<TagColor>(tag.color);
+  const [failedSignature, setFailedSignature] = useState<string>();
+  const previousTag = useRef(tag);
+  const update = useMutation({
+    mutationFn: ({
+      name: nextName,
+      color: nextColor,
+      revision,
+    }: {
+      name: string;
+      color: TagColor;
+      revision: number;
+      signature: string;
+    }) => {
+      if (!participant) throw new Error("Select a participant before changing tags.");
+      return api.updateTag(tag.id, { name: nextName, color: nextColor, revision }, participant.id);
+    },
+    onSuccess: async () => {
+      setFailedSignature(undefined);
+      await queryClient.invalidateQueries({ queryKey: boardKey });
+    },
+    onError: async (_error, variables) => {
+      setFailedSignature(variables.signature);
+      await queryClient.invalidateQueries({ queryKey: boardKey });
+    },
+  });
+  const { isPending, mutate, reset } = update;
+
+  useEffect(() => {
+    const previous = previousTag.current;
+    setName((current) => (current.trim() === previous.name ? tag.name : current));
+    setColor((current) => (current === previous.color ? tag.color : current));
+    previousTag.current = tag;
+  }, [tag]);
+
+  const persist = useCallback(() => {
+    const nextName = name.trim();
+    const signature = `${nextName}\u0000${color}\u0000${tag.revision}`;
+    if (
+      !nextName ||
+      isPending ||
+      (nextName === tag.name && color === tag.color) ||
+      failedSignature === signature
+    ) {
+      return;
+    }
+
+    mutate({ name: nextName, color, revision: tag.revision, signature });
+  }, [color, failedSignature, isPending, mutate, name, tag]);
+
+  useEffect(() => {
+    const nextName = name.trim();
+    const delay = nextName === tag.name && color !== tag.color ? 0 : 400;
+    const timeout = window.setTimeout(persist, delay);
+    return () => window.clearTimeout(timeout);
+  }, [color, name, persist, tag.color, tag.name]);
+
+  return (
+    <div className="tag-manager-row">
+      <input
+        className="tag-name-input"
+        value={name}
+        maxLength={40}
+        aria-label={`Rename ${tag.name}`}
+        onBlur={persist}
+        onChange={(event) => {
+          if (!isPending) reset();
+          setFailedSignature(undefined);
+          setName(event.target.value);
+        }}
+      />
+      <TagColorField
+        color={color}
+        label={`Color for ${tag.name}`}
+        onChange={(nextColor) => {
+          if (!isPending) reset();
+          setFailedSignature(undefined);
+          setColor(nextColor);
+        }}
+      />
+    </div>
   );
 }
 
@@ -943,74 +1097,36 @@ function BoardSettingsDialog({
 }) {
   const queryClient = useQueryClient();
   const [newName, setNewName] = useState("");
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    setDrafts(Object.fromEntries(tags.map((tag) => [tag.id, tag.name])));
-  }, [tags]);
+  const [newColor, setNewColor] = useState<TagColor>(defaultTagColor);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: boardKey });
   const create = useMutation({
-    mutationFn: (name: string) => {
+    mutationFn: ({ name, color }: { name: string; color: TagColor }) => {
       if (!participant) throw new Error("Select a participant before creating tags.");
-      return api.createTag(boardId, name, participant.id);
+      return api.createTag(boardId, name, color, participant.id);
     },
     onSuccess: () => {
       setNewName("");
+      setNewColor(defaultTagColor);
       void refresh();
     },
   });
-  const rename = useMutation({
-    mutationFn: ({ tag, name }: { tag: Tag; name: string }) => {
-      if (!participant) throw new Error("Select a participant before renaming tags.");
-      return api.updateTag(tag.id, { name, revision: tag.revision }, participant.id);
-    },
-    onSuccess: refresh,
-  });
-  const error = create.error ?? rename.error;
 
   return (
     <Dialog title="Board settings" onClose={onClose}>
       <section className="settings-section">
         <h3>Tags</h3>
-        <p className="dialog-copy">Create and rename the tags available across this board.</p>
+        <p className="dialog-copy">Edit the tags available across this board.</p>
         <div className="tag-manager-list">
           {tags.map((tag) => (
-            <form
-              className="tag-manager-row"
-              key={tag.id}
-              onSubmit={(event) => {
-                event.preventDefault();
-                rename.mutate({ tag, name: drafts[tag.id].trim() });
-              }}
-            >
-              <input
-                className="tag-name-input"
-                value={drafts[tag.id] ?? tag.name}
-                maxLength={40}
-                aria-label={`Rename ${tag.name}`}
-                onChange={(event) =>
-                  setDrafts((current) => ({ ...current, [tag.id]: event.target.value }))
-                }
-              />
-              <Button
-                variant="quiet"
-                size="small"
-                type="submit"
-                disabled={
-                  rename.isPending || !drafts[tag.id]?.trim() || drafts[tag.id]?.trim() === tag.name
-                }
-              >
-                Rename
-              </Button>
-            </form>
+            <TagManagerRow tag={tag} boardKey={boardKey} participant={participant} key={tag.id} />
           ))}
         </div>
         <form
           className="tag-create-row"
           onSubmit={(event) => {
             event.preventDefault();
-            create.mutate(newName.trim());
+            create.mutate({ name: newName.trim(), color: newColor });
           }}
         >
           <input
@@ -1021,11 +1137,12 @@ function BoardSettingsDialog({
             aria-label="New tag name"
             onChange={(event) => setNewName(event.target.value)}
           />
+          <TagColorField color={newColor} label="New tag color" onChange={setNewColor} />
           <Button size="small" type="submit" disabled={!newName.trim() || create.isPending}>
             Add tag
           </Button>
         </form>
-        {error && <p className="form-error">{error.message}</p>}
+        {create.error && <p className="form-error">{create.error.message}</p>}
       </section>
     </Dialog>
   );
@@ -1285,7 +1402,7 @@ function Dialog({
 function LoadingScreen() {
   return (
     <div className="loading-screen">
-      <img src="/shale-mark.png" alt="" />
+      <img src="/shale-mark.svg" alt="" />
       <span>Loading Shale…</span>
     </div>
   );

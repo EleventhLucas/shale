@@ -126,6 +126,7 @@ describe("Shale vertical slice", () => {
   });
 
   it("allows attributed mutations without a session when passwordless", async () => {
+    db.query("UPDATE tags SET color = 'blue' WHERE id = 'tag-collaboration'").run();
     const app = createApp(db, {
       port: 3000,
       dataDir: ".",
@@ -173,7 +174,8 @@ describe("Shale vertical slice", () => {
       body: JSON.stringify({ name: "Needs review" }),
     });
     expect(createdTag.status).toBe(201);
-    const tag = (await createdTag.json()) as { id: string; revision: number };
+    const tag = (await createdTag.json()) as { id: string; color: string; revision: number };
+    expect(tag.color).toBe("#6b6b68");
 
     const tagged = await app.request("/_shale/cards/card-live/tags", {
       method: "PATCH",
@@ -189,7 +191,10 @@ describe("Shale vertical slice", () => {
     });
     expect(tagged.status).toBe(200);
     expect(await tagged.json()).toMatchObject({
-      tags: [{ name: "Collaboration" }, { name: "Needs review" }],
+      tags: [
+        { name: "Collaboration", color: "#4f78b8" },
+        { name: "Needs review", color: "#6b6b68" },
+      ],
     });
 
     const renamed = await app.request(`/_shale/tags/${tag.id}`, {
@@ -199,7 +204,11 @@ describe("Shale vertical slice", () => {
         origin,
         "x-shale-participant": participant.id,
       },
-      body: JSON.stringify({ name: "Ready for review", revision: tag.revision }),
+      body: JSON.stringify({
+        name: "Ready for review",
+        color: "#3a7bd5",
+        revision: tag.revision,
+      }),
     });
     expect(renamed.status).toBe(200);
 
@@ -208,12 +217,14 @@ describe("Shale vertical slice", () => {
     ).json()) as {
       workspace: { name: string };
       board: { name: string };
-      tags: Array<{ name: string }>;
+      tags: Array<{ name: string; color: string }>;
       columns: Array<{ cards: Array<Record<string, unknown>> }>;
     };
     expect(snapshot.workspace.name).toBe("Sample Workspace");
     expect(snapshot.board.name).toBe("Sample Board");
-    expect(snapshot.tags.some((item) => item.name === "Ready for review")).toBe(true);
+    expect(
+      snapshot.tags.some((item) => item.name === "Ready for review" && item.color === "#3a7bd5"),
+    ).toBe(true);
     const liveCard = snapshot.columns
       .flatMap((column) => column.cards)
       .find((card) => card.id === "card-live");

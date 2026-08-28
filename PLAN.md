@@ -15,11 +15,11 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 
 - Organize content as workspaces -> boards -> columns -> cards. Workspaces are organizational only and do not establish permissions.
 - Support column reordering and card reordering or movement between columns on the same board.
-  - Provide pointer and keyboard drag-and-drop from a full-width top grab strip with a horizontal grip.
+  - Provide pointer and keyboard drag-and-drop from the entire card surface; a click still opens card details.
   - Keep post-drop feedback stable; do not animate cards back toward their previous positions.
 - Cards support:
   - Title and GFM Markdown description.
-  - Multiple board-scoped text tags. Cards use removable tag badges and a searchable assignment picker; tag creation and renaming lives in a board settings modal opened from the sidebar.
+  - Multiple board-scoped text tags with editable names and colors. Board settings offers useful presets and a full color picker; edits save automatically without per-tag save buttons. Cards use removable tag badges and a searchable assignment picker; tag creation and management lives in a board settings modal opened from the sidebar.
   - Multiple assignees selected from the instance-wide participant list.
   - Timestamped plain-text comments with display-name attribution.
 - Ticket due dates and checklists are intentionally omitted. Scheduling belongs to boards and a future sprint-level model rather than individual tickets.

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   createParticipantInputSchema,
+  createTagInputSchema,
   moveCardInputSchema,
   updateCardInputSchema,
+  updateTagInputSchema,
 } from "../../src/shared/contracts";
 
 describe("shared input contracts", () => {
@@ -40,6 +42,21 @@ describe("shared input contracts", () => {
         targetPosition: -1,
         revision: 3,
       }),
+    ).toThrow();
+  });
+
+  it("accepts six-digit tag colors and supplies a neutral default", () => {
+    expect(createTagInputSchema.parse({ name: "Review" })).toEqual({
+      name: "Review",
+      color: "#6b6b68",
+    });
+    expect(updateTagInputSchema.parse({ name: "Review", color: "#A1B2C3", revision: 2 })).toEqual({
+      name: "Review",
+      color: "#a1b2c3",
+      revision: 2,
+    });
+    expect(() =>
+      updateTagInputSchema.parse({ name: "Review", color: "violet", revision: 2 }),
     ).toThrow();
   });
 });

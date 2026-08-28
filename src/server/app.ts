@@ -189,7 +189,8 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
     auth.requireParticipant,
     zValidator("json", createTagInputSchema),
     (c) => {
-      const result = createTag(db, randomUUID(), c.req.param("boardId"), c.req.valid("json").name);
+      const input = c.req.valid("json");
+      const result = createTag(db, randomUUID(), c.req.param("boardId"), input.name, input.color);
       if (result.status === "not_found") return c.json({ error: "Board not found." }, 404);
       if (result.status === "duplicate") {
         return c.json({ error: "That tag already exists on this board." }, 409);
@@ -206,7 +207,7 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
     zValidator("json", updateTagInputSchema),
     (c) => {
       const input = c.req.valid("json");
-      const result = updateTag(db, c.req.param("tagId"), input.name, input.revision);
+      const result = updateTag(db, c.req.param("tagId"), input.name, input.color, input.revision);
       if (result.status === "not_found") return c.json({ error: "Tag not found." }, 404);
       if (result.status === "duplicate") {
         return c.json({ error: "That tag name is already in use on this board." }, 409);

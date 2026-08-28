@@ -7,9 +7,11 @@ import type {
   Card,
   Participant,
   Tag,
+  TagColor,
   TrashItem,
   TrashItemType,
 } from "../shared/contracts";
+import { defaultTagColor, tagColorSchema } from "../shared/contracts";
 
 type SqliteValue = string | number | bigint | boolean | Uint8Array | null;
 type Row = Record<string, SqliteValue>;
@@ -26,6 +28,21 @@ function now(): string {
 
 function asRows(value: unknown): Row[] {
   return value as Row[];
+}
+
+const legacyTagColors: Record<string, TagColor> = {
+  neutral: defaultTagColor,
+  red: "#c15b53",
+  amber: "#b87d26",
+  green: "#4f8a62",
+  blue: "#4f78b8",
+  violet: "#8064b2",
+};
+
+function tagColorFromRow(value: SqliteValue): TagColor {
+  const color = String(value);
+  const parsed = tagColorSchema.safeParse(color);
+  return parsed.success ? parsed.data : (legacyTagColors[color] ?? defaultTagColor);
 }
 
 export function openDatabase(dataDir: string): Database {
@@ -145,8 +162,8 @@ export function seedSandbox(db: Database): void {
     const insertTag = db.query(
       "INSERT INTO tags (id, board_id, name, color, position) VALUES (?, ?, ?, ?, ?)",
     );
-    insertTag.run("tag-getting-started", fixture.boardId, "Getting started", "neutral", 0);
-    insertTag.run("tag-collaboration", fixture.boardId, "Collaboration", "neutral", 1);
+    insertTag.run("tag-getting-started", fixture.boardId, "Getting started", "#4f78b8", 0);
+    insertTag.run("tag-collaboration", fixture.boardId, "Collaboration", "#4f8a62", 1);
     db.query("INSERT INTO card_tags (card_id, label_id) VALUES (?, ?)").run(
       "card-welcome",
       "tag-getting-started",
@@ -217,12 +234,13 @@ function cardFromRow(db: Database, row: Row): Card {
   const tags = asRows(
     db
       .query(
-        "SELECT tags.id, tags.name, tags.revision FROM tags JOIN card_tags ON card_tags.label_id = tags.id WHERE card_tags.card_id = ? ORDER BY tags.position",
+        "SELECT tags.id, tags.name, tags.color, tags.revision FROM tags JOIN card_tags ON card_tags.label_id = tags.id WHERE card_tags.card_id = ? ORDER BY tags.position",
       )
       .all(row.id),
   ).map((tag) => ({
     id: String(tag.id),
     name: String(tag.name),
+    color: tagColorFromRow(tag.color),
     revision: Number(tag.revision),
   }));
   const assigneeIds = asRows(
@@ -282,11 +300,12 @@ export function getBoard(
 
   const tags = asRows(
     db
-      .query("SELECT id, name, revision FROM tags WHERE board_id = ? ORDER BY position")
+      .query("SELECT id, name, color, revision FROM tags WHERE board_id = ? ORDER BY position")
       .all(row.board_id),
   ).map((tag) => ({
     id: String(tag.id),
     name: String(tag.name),
+    color: tagColorFromRow(tag.color),
     revision: Number(tag.revision),
   }));
 
@@ -327,6 +346,7 @@ export function createTag(
   tagId: string,
   boardId: string,
   name: string,
+  color: TagColor,
 ): CreateTagResult {
   const board = db.query("SELECT id FROM boards WHERE id = ? AND trashed_at IS NULL").get(boardId);
   if (!board) return { status: "not_found" };
@@ -338,13 +358,17 @@ export function createTag(
     ).position,
   );
   try {
-    db.query(
-      "INSERT INTO tags (id, board_id, name, color, position) VALUES (?, ?, ?, 'neutral', ?)",
-    ).run(tagId, boardId, name, position);
+    db.query("INSERT INTO tags (id, board_id, name, color, position) VALUES (?, ?, ?, ?, ?)").run(
+      tagId,
+      boardId,
+      name,
+      color,
+      position,
+    );
   } catch {
     return { status: "duplicate" };
   }
-  return { status: "ok", tag: { id: tagId, name, revision: 1 } };
+  return { status: "ok", tag: { id: tagId, name, color, revision: 1 } };
 }
 
 export type UpdateTagResult =
@@ -357,25 +381,33 @@ export function updateTag(
   db: Database,
   tagId: string,
   name: string,
+  color: TagColor,
   revision: number,
 ): UpdateTagResult {
   const row = db
-    .query("SELECT id, name, revision, board_id FROM tags WHERE id = ?")
+    .query("SELECT id, name, color, revision, board_id FROM tags WHERE id = ?")
     .get(tagId) as Row | null;
   if (!row) return { status: "not_found" };
-  const current = { id: String(row.id), name: String(row.name), revision: Number(row.revision) };
+  const current = {
+    id: String(row.id),
+    name: String(row.name),
+    color: tagColorFromRow(row.color),
+    revision: Number(row.revision),
+  };
   if (current.revision !== revision) return { status: "conflict", tag: current };
   try {
     const result = db
-      .query("UPDATE tags SET name = ?, revision = revision + 1 WHERE id = ? AND revision = ?")
-      .run(name, tagId, revision);
+      .query(
+        "UPDATE tags SET name = ?, color = ?, revision = revision + 1 WHERE id = ? AND revision = ?",
+      )
+      .run(name, color, tagId, revision);
     if (result.changes === 0) return { status: "conflict", tag: current };
   } catch {
     return { status: "duplicate" };
   }
   return {
     status: "ok",
-    tag: { id: tagId, name, revision: revision + 1 },
+    tag: { id: tagId, name, color, revision: revision + 1 },
     boardId: String(row.board_id),
   };
 }

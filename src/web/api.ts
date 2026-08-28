@@ -6,6 +6,7 @@ import {
   participantSchema,
   sessionStateSchema,
   type Tag,
+  type TagColor,
   type TrashItemType,
   tagSchema,
   trashSnapshotSchema,
@@ -90,17 +91,22 @@ export const api = {
         body: JSON.stringify(input),
       }),
     ),
-  createTag: async (boardId: string, name: string, participantId: string): Promise<Tag> =>
+  createTag: async (
+    boardId: string,
+    name: string,
+    color: TagColor,
+    participantId: string,
+  ): Promise<Tag> =>
     tagSchema.parse(
       await request(`/_shale/boards/${encodeURIComponent(boardId)}/tags`, {
         method: "POST",
         headers: { "x-shale-participant": participantId },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, color }),
       }),
     ),
   updateTag: async (
     tagId: string,
-    input: { name: string; revision: number },
+    input: { name: string; color: TagColor; revision: number },
     participantId: string,
   ): Promise<Tag> =>
     tagSchema.parse(

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="640 56 560 692">
+  <title>Shale mark</title>
+  <defs>
+    <clipPath id="shale-mark-clip" clipPathUnits="userSpaceOnUse">
+      <path d="M745 68H1089C1141 68 1171 83 1183 113C1187 123 1188 132 1188 144V642C1188 703 1158 735 1095 735H744C682 735 652 703 652 642V159C652 98 683 68 745 68Z" />
+    </clipPath>
+  </defs>
+  <g
+    clip-path="url(#shale-mark-clip)"
+    fill="none"
+    stroke="#fff"
+    stroke-width="13"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M650 686C675 629 706 594 746 559C815 498 886 449 957 393C1055 316 1131 223 1190 112" />
+    <path d="M746 559C830 522 913 483 996 436C1075 391 1139 343 1190 285" />
+    <path d="M746 559C838 533 926 506 1011 474C1084 447 1142 417 1191 382" />
+  </g>
+  <path
+    d="M745 68H1089C1141 68 1171 83 1183 113C1187 123 1188 132 1188 144V642C1188 703 1158 735 1095 735H744C682 735 652 703 652 642V159C652 98 683 68 745 68Z"
+    fill="none"
+    stroke="#fff"
+    stroke-width="13"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

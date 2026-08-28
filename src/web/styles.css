@@ -442,7 +442,7 @@ a {
   border-radius: 8px;
   box-shadow: 0 1px 1px rgb(0 0 0 / 3%);
   color: var(--ink);
-  cursor: default;
+  cursor: grab;
   text-align: left;
   transition:
     border-color 140ms ease,
@@ -455,6 +455,7 @@ a {
 
 .card-tile--dragging {
   opacity: 0.35;
+  cursor: grabbing;
 }
 
 .card-preview {
@@ -467,36 +468,6 @@ a {
   cursor: grabbing;
 }
 
-.card-grab-area {
-  display: flex;
-  width: 100%;
-  min-height: 31px;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  background: color-mix(in srgb, var(--sidebar) 48%, transparent);
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 7px 7px 0 0;
-  color: var(--faint);
-  cursor: grab;
-  transition:
-    background 140ms ease,
-    box-shadow 140ms ease,
-    color 140ms ease;
-}
-
-.card-grab-area:active {
-  cursor: grabbing;
-}
-
-.card-grab-area:hover,
-.card-grab-area:focus-visible {
-  background: var(--sidebar);
-  box-shadow: inset 0 -1px 0 var(--line-strong);
-  color: var(--ink);
-}
-
 .card-open {
   display: block;
   width: 100%;
@@ -504,7 +475,7 @@ a {
   background: transparent;
   border: 0;
   color: inherit;
-  cursor: pointer;
+  cursor: inherit;
   text-align: left;
 }
 
@@ -530,17 +501,19 @@ a {
 }
 
 .tag {
+  --tag-color: var(--ink);
   display: inline-flex;
   align-items: center;
   min-height: 20px;
   padding: 0 0.45rem;
-  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--tag-color) 20%, var(--panel-strong));
+  border: 1px solid color-mix(in srgb, var(--tag-color) 68%, var(--line));
   border-radius: 4px;
-  color: var(--muted);
+  box-shadow: inset 3px 0 0 var(--tag-color);
+  color: var(--ink);
   font-size: 0.59rem;
   font-weight: 750;
   letter-spacing: 0.04em;
-  background: color-mix(in srgb, var(--ink) 6%, transparent);
 }
 
 .column-empty {
@@ -799,6 +772,9 @@ a {
 }
 
 .tag-picker-options button {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
   padding: 0.45rem 0.5rem;
   background: transparent;
   border: 0;
@@ -813,7 +789,7 @@ a {
   background: var(--sidebar);
 }
 
-.tag-picker-options span {
+.tag-picker-empty {
   padding: 0.55rem;
   color: var(--faint);
   font-size: 0.7rem;
@@ -845,10 +821,16 @@ a {
   overflow-y: auto;
 }
 
-.tag-manager-row,
+.tag-manager-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 148px;
+  align-items: center;
+  gap: 0.55rem;
+}
+
 .tag-create-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 148px auto;
   align-items: center;
   gap: 0.55rem;
 }
@@ -874,6 +856,67 @@ a {
 .tag-name-input:focus {
   border-color: var(--ink);
   box-shadow: 0 0 0 1px var(--ink);
+}
+
+.tag-color-field {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.tag-color-field select {
+  min-width: 0;
+  flex: 1;
+  height: 34px;
+  padding: 0 0.35rem;
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  cursor: pointer;
+  outline: none;
+}
+
+.tag-color-field select:focus {
+  border-color: var(--ink);
+}
+
+.tag-color-input {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  padding: 3px;
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tag-color-input:focus-visible {
+  border-color: var(--ink);
+  outline: 1px solid var(--ink);
+}
+
+.tag-color-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.tag-color-input::-webkit-color-swatch,
+.tag-color-input::-moz-color-swatch {
+  border: 0;
+  border-radius: 3px;
+}
+
+.tag-color-dot {
+  --tag-color: var(--ink);
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  background: var(--tag-color);
+  border: 1px solid color-mix(in srgb, var(--tag-color) 70%, var(--ink));
+  border-radius: 50%;
 }
 
 .field-label {
@@ -1166,6 +1209,16 @@ a {
 
   .drawer-content {
     padding: 1.5rem 1.2rem;
+  }
+
+  .tag-manager-row,
+  .tag-create-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .tag-manager-row .tag-name-input,
+  .tag-create-row .tag-name-input {
+    grid-column: 1 / -1;
   }
 }
 

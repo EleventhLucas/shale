@@ -8,7 +8,7 @@ const db = openDatabase(config.dataDir);
 const app = createApp(db, config);
 
 app.get("/assets/*", serveStatic({ root: "./dist/web" }));
-app.get("/shale-mark.png", serveStatic({ root: "./dist/web" }));
+app.get("/shale-mark.svg", serveStatic({ root: "./dist/web" }));
 app.get("*", serveStatic({ path: "./dist/web/index.html" }));
 
 const server = Bun.serve({

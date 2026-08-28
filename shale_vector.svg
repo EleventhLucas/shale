@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254">
+  <title>Shale brand variants</title>
+<defs>
+    <clipPath id="clipLeft" clipPathUnits="userSpaceOnUse">
+      <path d="
+        M160 68 H504
+        C556 68 586 83 598 113
+        C602 123 603 132 603 144
+        V1088
+        C603 1149 573 1181 510 1181
+        H159
+        C97 1181 67 1149 67 1088
+        V159
+        C67 98 98 68 160 68 Z"/>
+    </clipPath>
+
+    <clipPath id="clipRight" clipPathUnits="userSpaceOnUse">
+      <path d="
+        M745 68 H1089
+        C1141 68 1171 83 1183 113
+        C1187 123 1188 132 1188 144
+        V642
+        C1188 703 1158 735 1095 735
+        H744
+        C682 735 652 703 652 642
+        V159
+        C652 98 683 68 745 68 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- LEFT SHALE -->
+  <g clip-path="url(#clipLeft)" fill="none" stroke="#fff" stroke-width="13"
+     stroke-linecap="round" stroke-linejoin="round">
+    <!-- long ribbon edge -->
+    <path d="
+      M66 1030
+      C108 943 158 858 221 801
+      C293 735 368 684 439 628
+      C510 572 565 505 590 430
+      C599 402 603 368 603 320"/>
+    <!-- long outer sweep -->
+    <path d="
+      M73 1178
+      C69 1086 89 984 139 891
+      C188 800 254 720 324 636
+      C414 528 499 420 557 312
+      C584 262 599 203 603 114"/>
+    <!-- inner lower edge -->
+    <path d="
+      M221 801
+      C306 748 394 697 477 648
+      C536 613 578 578 607 524"/>
+  </g>
+
+  <path d="
+    M160 68 H504
+    C556 68 586 83 598 113
+    C602 123 603 132 603 144
+    V1088
+    C603 1149 573 1181 510 1181
+    H159
+    C97 1181 67 1149 67 1088
+    V159
+    C67 98 98 68 160 68 Z"
+    fill="none" stroke="#fff" stroke-width="13"
+    stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- RIGHT SHALE -->
+  <g clip-path="url(#clipRight)" fill="none" stroke="#fff" stroke-width="13"
+     stroke-linecap="round" stroke-linejoin="round">
+    <!-- dominant sweep -->
+    <path d="
+      M650 686
+      C675 629 706 594 746 559
+      C815 498 886 449 957 393
+      C1055 316 1131 223 1190 112"/>
+    <!-- middle sweep -->
+    <path d="
+      M746 559
+      C830 522 913 483 996 436
+      C1075 391 1139 343 1190 285"/>
+    <!-- lower sweep -->
+    <path d="
+      M746 559
+      C838 533 926 506 1011 474
+      C1084 447 1142 417 1191 382"/>
+  </g>
+
+  <path d="
+    M745 68 H1089
+    C1141 68 1171 83 1183 113
+    C1187 123 1188 132 1188 144
+    V642
+    C1188 703 1158 735 1095 735
+    H744
+    C682 735 652 703 652 642
+    V159
+    C652 98 683 68 745 68 Z"
+    fill="none" stroke="#fff" stroke-width="13"
+    stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
