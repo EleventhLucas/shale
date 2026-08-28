@@ -3,9 +3,12 @@ AGENTS_LOCAL.md
 .env
 .env.*
 !.env.example
+.secrets/
+.test-data/
 
 node_modules/
 dist/
+.data/
 .vite/
 coverage/
 playwright-report/

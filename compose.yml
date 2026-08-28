@@ -1,0 +1,22 @@
+services:
+  shale:
+    image: shale:0.1.0
+    build:
+      context: .
+    ports:
+      - "3000:3000"
+    environment:
+      SHALE_PASSWORD_FILE: /run/secrets/shale_password
+      SHALE_PUBLIC_ORIGIN: http://localhost:3000
+    secrets:
+      - shale_password
+    volumes:
+      - shale_data:/data
+    restart: unless-stopped
+
+secrets:
+  shale_password:
+    file: ./.secrets/shale_password
+
+volumes:
+  shale_data:

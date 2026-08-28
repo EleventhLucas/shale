@@ -1,0 +1,14 @@
+.git
+.env*
+.secrets
+AGENTS_LOCAL.md
+node_modules
+dist
+coverage
+playwright-report
+test-results
+*.sqlite*
+backups
+shale.png
+shale_app.png
+shale_vector.png

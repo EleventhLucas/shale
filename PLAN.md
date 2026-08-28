@@ -5,7 +5,8 @@
 Build Shale as a minimal, open-source kanban server for small trusted groups.
 
 - The primary deliverable is one Linux x64 Docker image serving both the backend and Web UI.
-- Anyone with the unlisted URL can read boards. Editing requires a host-configured shared password.
+- Anyone with the unlisted URL can read boards. Editing requires a host-configured shared password
+  when one is configured; without one, the instance is publicly editable.
 - There are no user accounts or roles. Editors select or create a display name for attribution and assignment; all unlocked editors have equal capabilities.
 - SQLite is the only database. PostgreSQL, public APIs, plugins, integrations, and hosted-service functionality are deferred.
 - The application remains focused on creating boards, adding cards, and moving work forward.
@@ -14,20 +15,19 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 
 - Organize content as workspaces -> boards -> columns -> cards. Workspaces are organizational only and do not establish permissions.
 - Support column reordering and card reordering or movement between columns on the same board.
-  - Provide pointer and keyboard drag-and-drop.
-  - Include explicit Move menus as an accessible fallback.
+  - Provide pointer and keyboard drag-and-drop from a full-width top grab strip with a horizontal grip.
+  - Keep post-drop feedback stable; do not animate cards back toward their previous positions.
 - Cards support:
   - Title and GFM Markdown description.
-  - Multiple board-scoped labels from a fixed accessible color palette.
+  - Multiple board-scoped text tags. Cards use removable tag badges and a searchable assignment picker; tag creation and renaming lives in board-level management.
   - Multiple assignees selected from the instance-wide participant list.
-  - One date-only due date.
-  - Multiple reorderable checklists.
   - Timestamped plain-text comments with display-name attribution.
-- Title and description editing uses explicit Save/Cancel. Moves, labels, assignees, dates, checklist changes, and comments persist immediately.
+- Ticket due dates and checklists are intentionally omitted. Scheduling belongs to boards and a future sprint-level model rather than individual tickets.
+- Title and description use an inline editing mode with explicit Save/Cancel so the card drawer retains its layout. Moves, tags, assignees, and comments persist immediately.
 - Open card details in a right-side drawer by default. Provide a control to switch between drawer and centered-modal presentation and remember that preference in the browser. Card URLs remain directly linkable in either presentation.
-- Search only the current board's card titles and descriptions. Filters cover labels, assignees, due state, and unassigned/no-due cards. Combine categories with AND and selections within a category with OR.
+- Show the board title once in the top breadcrumb bar, with a left-aligned board search toolbar below it. Search only the current board's card titles and descriptions. Filters cover tags, assignees, and unassigned cards. Combine categories with AND and selections within a category with OR.
 - Move workspaces, boards, columns, and cards to a recoverable trash. Retain trash indefinitely until an unlocked editor restores or explicitly permanently deletes it.
-- Create a resettable Shale Sandbox workspace on a new database. Its fixture board demonstrates columns, Markdown, labels, dates, checklists, comments, filtering, trash, and drag-and-drop without adding fake participants. Reset affects only the marked sandbox workspace and requires confirmation.
+- Create a resettable Sample Workspace on a new database. Its Sample Board demonstrates columns, Markdown, editable tags, comments, filtering, trash, and drag-and-drop without adding fake participants. Reset affects only the marked sample workspace and requires confirmation.
 - Match Graphite's compact monochrome design family, including local fonts/icons, light and dark themes, a one-click theme toggle, clear focus states, and no remote assets.
 - Target current desktop Chrome, Edge, Firefox, and Safari. Keep narrow layouts readable with collapsible navigation and horizontally scrolling boards, but defer polished mobile and touch workflows.
 
@@ -39,7 +39,7 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 - Use `bun:sqlite` directly with prepared statements and ordered SQL migrations; do not add an ORM or premature database abstraction.
   - Enable foreign keys, WAL mode, and a bounded busy timeout.
   - Store the database at `${SHALE_DATA_DIR}/shale.sqlite`, defaulting to `/data` in Docker.
-  - Use transactional dense integer positions for columns, cards, checklist groups, and checklist items.
+  - Use transactional dense integer positions for columns and cards.
   - Run one Shale server process against one database; horizontal replicas are unsupported.
 - Use entity revisions for mutable records. Text saves submit the last-read revision; stale writes return a conflict with the current snapshot and offer Use Latest or Force Save. Immediate controls refetch and report failure if their optimistic mutation loses a race.
 - Deliver live collaboration through Server-Sent Events. Events carry resource identifiers and revisions, not full content; clients invalidate affected queries. Reconnecting or missing events triggers a normal refetch.
@@ -49,8 +49,9 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
   - Allow unlocked editors to choose, add, rename, deactivate, or reactivate names.
   - Enforce non-empty, case-insensitively unique display names.
   - Preserve historical comments and assignments when a participant is deactivated.
-- Protect mutations and operational actions with the shared gateway:
-  - Require exactly one of `SHALE_PASSWORD` or `SHALE_PASSWORD_FILE`; fail startup without it.
+- Protect mutations and operational actions with the shared gateway when a password is configured:
+  - Accept at most one of `SHALE_PASSWORD` or `SHALE_PASSWORD_FILE`. With neither configured, allow
+    public editing while continuing to require participant attribution.
   - Compare passwords in constant time and apply bounded in-memory unlock throttling.
   - Issue random opaque sessions, store only hashed session tokens in SQLite, use HttpOnly/SameSite cookies, and expire sessions after 30 days.
   - Password rotation invalidates existing sessions. Provide an explicit Lock Editing action.
@@ -86,10 +87,10 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 
 ## Test and Acceptance Plan
 
-- Unit-test validation, natural ordering, board search/filter combinations, Markdown sanitization, participant uniqueness/deactivation, revisions, session expiry/password rotation, trash restoration, sandbox reset boundaries, and backup retention.
+- Unit-test validation, natural ordering, board search/filter combinations, Markdown sanitization, participant uniqueness/deactivation, revisions, session expiry/password rotation, trash restoration, sample reset boundaries, and backup retention.
 - Integration-test migrations and CRUD against temporary SQLite databases, transactional card movement, concurrent revision conflicts, cascading trash/restore, consistent live-database snapshots, and SSE invalidation delivery.
 - Component-test public read mode, unlock and identity prompts, board navigation, card drawer/modal switching, explicit text saves, immediate card controls, filters, theme behavior, trash, and accessible focus states.
-- Use browser tests for pointer and keyboard card movement, accessible Move menus, deep-linked cards, simultaneous sessions receiving live changes, conflict recovery, sandbox reset, and persisted browser preferences.
+- Use browser tests for pointer and keyboard card movement, deep-linked cards, simultaneous sessions receiving live changes, conflict recovery, sample reset, and persisted browser preferences.
 - Add a bounded Docker smoke test using a temporary volume: start the image with a test password, wait for `/healthz`, confirm the sandbox board renders, unlock editing, perform one card mutation, restart the container, and confirm persistence without touching tracked files.
 - Acceptance requires all tests, type checking, linting, formatting checks, production build, portability/privacy scan, and Linux x64 Docker smoke test to pass. The container must remain functional without outbound network access.
 
