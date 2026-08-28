@@ -19,7 +19,6 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Archive,
   Check,
   ChevronLeft,
   CircleUserRound,
@@ -28,9 +27,11 @@ import {
   Menu,
   Moon,
   Plus,
+  RotateCcw,
   Search,
+  Settings,
   Sun,
-  Tags,
+  Trash2,
   UnlockKeyhole,
   X,
 } from "lucide-react";
@@ -39,7 +40,7 @@ import ReactMarkdown from "react-markdown";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import type { BoardSnapshot, Card, Column, Participant, Tag } from "../shared/contracts";
+import type { BoardSnapshot, Card, Column, Participant, Tag, TrashItem } from "../shared/contracts";
 import { ApiError, api } from "./api";
 import { Button } from "./components/button";
 
@@ -195,7 +196,8 @@ function BoardPage({
   const queryClient = useQueryClient();
   const [navOpen, setNavOpen] = useState(true);
   const [search, setSearch] = useState("");
-  const [tagManagerOpen, setTagManagerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   const [activeCardId, setActiveCardId] = useState<string>();
   const [moveError, setMoveError] = useState<string>();
   const sensors = useSensors(
@@ -327,8 +329,26 @@ function BoardPage({
           ))}
         </nav>
         <div className="sidebar-footer">
-          <Archive size={15} /> Trash
-          <span>Soon</span>
+          <button
+            type="button"
+            aria-label="Open Trash"
+            title="Trash"
+            onClick={() => {
+              if (requestEditing()) setTrashOpen(true);
+            }}
+          >
+            <Trash2 size={17} />
+          </button>
+          <button
+            type="button"
+            aria-label="Open board settings"
+            title="Board settings"
+            onClick={() => {
+              if (requestEditing()) setSettingsOpen(true);
+            }}
+          >
+            <Settings size={17} />
+          </button>
         </div>
       </aside>
 
@@ -388,15 +408,6 @@ function BoardPage({
             />
             <kbd>/</kbd>
           </label>
-          <Button
-            variant="quiet"
-            size="small"
-            onClick={() => {
-              if (requestEditing()) setTagManagerOpen(true);
-            }}
-          >
-            <Tags size={15} /> Manage tags
-          </Button>
         </section>
 
         {moveError && (
@@ -438,15 +449,23 @@ function BoardPage({
           participant={participant}
           requestEditing={requestEditing}
           onClose={() => navigate(`/w/${workspaceSlug}/b/${boardSlug}`)}
+          onTrashed={() => navigate(`/w/${workspaceSlug}/b/${boardSlug}`)}
         />
       )}
-      {tagManagerOpen && (
-        <TagManagerDialog
+      {settingsOpen && (
+        <BoardSettingsDialog
           tags={board.data.tags}
           boardId={board.data.board.id}
           boardKey={["board", workspaceSlug, boardSlug]}
           participant={participant}
-          onClose={() => setTagManagerOpen(false)}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+      {trashOpen && (
+        <TrashDialog
+          boardKey={["board", workspaceSlug, boardSlug]}
+          participant={participant}
+          onClose={() => setTrashOpen(false)}
         />
       )}
     </div>
@@ -589,6 +608,7 @@ function CardDrawer({
   participant,
   requestEditing,
   onClose,
+  onTrashed,
 }: {
   card?: Card;
   boardKey: string[];
@@ -596,6 +616,7 @@ function CardDrawer({
   participant?: Participant;
   requestEditing: () => boolean;
   onClose: () => void;
+  onTrashed: () => void;
 }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -629,6 +650,17 @@ function CardDrawer({
         const current = (error.body as { current?: Card }).current;
         if (current) setConflict(current);
       }
+    },
+  });
+  const trashCard = useMutation({
+    mutationFn: () => {
+      if (!card || !participant) throw new Error("Select a participant before editing.");
+      return api.moveToTrash("card", card.id, participant.id);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: boardKey });
+      void queryClient.invalidateQueries({ queryKey: ["trash"] });
+      onTrashed();
     },
   });
 
@@ -782,6 +814,20 @@ function CardDrawer({
               </div>
             )}
           </form>
+          <div className="drawer-danger-row">
+            <Button
+              type="button"
+              variant="quiet"
+              size="small"
+              disabled={trashCard.isPending}
+              onClick={() => {
+                if (requestEditing()) trashCard.mutate();
+              }}
+            >
+              <Trash2 size={15} /> {trashCard.isPending ? "Moving…" : "Move card to Trash"}
+            </Button>
+            {trashCard.error && <p className="form-error">{trashCard.error.message}</p>}
+          </div>
         </div>
       </aside>
     </div>
@@ -882,7 +928,7 @@ function CardTagPicker({
   );
 }
 
-function TagManagerDialog({
+function BoardSettingsDialog({
   tags,
   boardId,
   boardKey,
@@ -924,59 +970,179 @@ function TagManagerDialog({
   const error = create.error ?? rename.error;
 
   return (
-    <Dialog title="Manage board tags" onClose={onClose}>
-      <p className="dialog-copy">Create and rename the tags available across this board.</p>
-      <div className="tag-manager-list">
-        {tags.map((tag) => (
-          <form
-            className="tag-manager-row"
-            key={tag.id}
-            onSubmit={(event) => {
-              event.preventDefault();
-              rename.mutate({ tag, name: drafts[tag.id].trim() });
-            }}
-          >
-            <input
-              className="tag-name-input"
-              value={drafts[tag.id] ?? tag.name}
-              maxLength={40}
-              aria-label={`Rename ${tag.name}`}
-              onChange={(event) =>
-                setDrafts((current) => ({ ...current, [tag.id]: event.target.value }))
-              }
-            />
-            <Button
-              variant="quiet"
-              size="small"
-              type="submit"
-              disabled={
-                rename.isPending || !drafts[tag.id]?.trim() || drafts[tag.id]?.trim() === tag.name
-              }
+    <Dialog title="Board settings" onClose={onClose}>
+      <section className="settings-section">
+        <h3>Tags</h3>
+        <p className="dialog-copy">Create and rename the tags available across this board.</p>
+        <div className="tag-manager-list">
+          {tags.map((tag) => (
+            <form
+              className="tag-manager-row"
+              key={tag.id}
+              onSubmit={(event) => {
+                event.preventDefault();
+                rename.mutate({ tag, name: drafts[tag.id].trim() });
+              }}
             >
-              Rename
-            </Button>
-          </form>
-        ))}
-      </div>
-      <form
-        className="tag-create-row"
-        onSubmit={(event) => {
-          event.preventDefault();
-          create.mutate(newName.trim());
-        }}
-      >
-        <input
-          className="tag-name-input"
-          value={newName}
-          maxLength={40}
-          placeholder="New tag"
-          aria-label="New tag name"
-          onChange={(event) => setNewName(event.target.value)}
-        />
-        <Button size="small" type="submit" disabled={!newName.trim() || create.isPending}>
-          Add tag
-        </Button>
-      </form>
+              <input
+                className="tag-name-input"
+                value={drafts[tag.id] ?? tag.name}
+                maxLength={40}
+                aria-label={`Rename ${tag.name}`}
+                onChange={(event) =>
+                  setDrafts((current) => ({ ...current, [tag.id]: event.target.value }))
+                }
+              />
+              <Button
+                variant="quiet"
+                size="small"
+                type="submit"
+                disabled={
+                  rename.isPending || !drafts[tag.id]?.trim() || drafts[tag.id]?.trim() === tag.name
+                }
+              >
+                Rename
+              </Button>
+            </form>
+          ))}
+        </div>
+        <form
+          className="tag-create-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            create.mutate(newName.trim());
+          }}
+        >
+          <input
+            className="tag-name-input"
+            value={newName}
+            maxLength={40}
+            placeholder="New tag"
+            aria-label="New tag name"
+            onChange={(event) => setNewName(event.target.value)}
+          />
+          <Button size="small" type="submit" disabled={!newName.trim() || create.isPending}>
+            Add tag
+          </Button>
+        </form>
+        {error && <p className="form-error">{error.message}</p>}
+      </section>
+    </Dialog>
+  );
+}
+
+function TrashDialog({
+  boardKey,
+  participant,
+  onClose,
+}: {
+  boardKey: string[];
+  participant?: Participant;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState<string>();
+  const trash = useQuery({ queryKey: ["trash"], queryFn: api.trash });
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ["trash"] });
+    void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+    void queryClient.invalidateQueries({ queryKey: boardKey });
+  };
+  const restore = useMutation({
+    mutationFn: (item: TrashItem) => {
+      if (!participant) throw new Error("Select a participant before restoring items.");
+      return api.restoreFromTrash(item.type, item.id, participant.id);
+    },
+    onSuccess: refresh,
+  });
+  const purge = useMutation({
+    mutationFn: (item: TrashItem) => {
+      if (!participant) throw new Error("Select a participant before deleting items.");
+      return api.permanentlyDelete(item.type, item.id, participant.id);
+    },
+    onSuccess: () => {
+      setConfirming(undefined);
+      refresh();
+    },
+  });
+  const error = restore.error ?? purge.error;
+
+  return (
+    <Dialog title="Trash" onClose={onClose}>
+      <p className="dialog-copy">
+        Restore recoverable items or permanently delete them. Items stay here until you choose.
+      </p>
+      {trash.isLoading ? (
+        <div className="trash-empty">Loading Trash…</div>
+      ) : trash.error ? (
+        <p className="form-error">{trash.error.message}</p>
+      ) : trash.data?.items.length ? (
+        <div className="trash-list">
+          {trash.data.items.map((item) => {
+            const itemKey = `${item.type}:${item.id}`;
+            return (
+              <article className="trash-item" key={itemKey}>
+                <div className="trash-item-heading">
+                  <span>{item.type}</span>
+                  <strong>{item.name}</strong>
+                </div>
+                <p>{item.context}</p>
+                <time dateTime={item.trashedAt}>{formatTrashDate(item.trashedAt)}</time>
+                {confirming === itemKey ? (
+                  <div className="trash-confirm" role="alert">
+                    <span>Delete permanently? This cannot be undone.</span>
+                    <div>
+                      <Button
+                        type="button"
+                        variant="quiet"
+                        size="small"
+                        onClick={() => setConfirming(undefined)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="small"
+                        disabled={purge.isPending}
+                        onClick={() => purge.mutate(item)}
+                      >
+                        Delete forever
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="trash-actions">
+                    <Button
+                      type="button"
+                      variant="quiet"
+                      size="small"
+                      disabled={restore.isPending || purge.isPending}
+                      onClick={() => restore.mutate(item)}
+                    >
+                      <RotateCcw size={14} /> Restore
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="quiet"
+                      size="small"
+                      disabled={restore.isPending || purge.isPending}
+                      onClick={() => setConfirming(itemKey)}
+                    >
+                      <Trash2 size={14} /> Delete forever
+                    </Button>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="trash-empty">
+          <Trash2 size={22} />
+          <span>Trash is empty.</span>
+        </div>
+      )}
       {error && <p className="form-error">{error.message}</p>}
     </Dialog>
   );
@@ -1127,4 +1293,11 @@ function LoadingScreen() {
 
 function EmptyState({ message = "No boards yet." }: { message?: string }) {
   return <div className="empty-screen">{message}</div>;
+}
+
+function formatTrashDate(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }

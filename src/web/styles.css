@@ -240,17 +240,28 @@ a {
   align-items: center;
   gap: 0.5rem;
   margin-top: auto;
-  padding: 1rem 1.2rem;
+  padding: 0.8rem 1rem;
   border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 0.78rem;
 }
 
-.sidebar-footer span {
-  margin-left: auto;
-  color: var(--faint);
-  font-size: 0.62rem;
-  text-transform: uppercase;
+.sidebar-footer button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sidebar-footer button:hover,
+.sidebar-footer button:focus-visible {
+  background: var(--panel-strong);
+  border-color: var(--line);
+  color: var(--ink);
 }
 
 .board-main {
@@ -595,6 +606,16 @@ a {
   padding: 2rem 2.3rem;
 }
 
+.drawer-danger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
 .drawer-title-row {
   display: flex;
   align-items: flex-start;
@@ -894,6 +915,10 @@ a {
   font-size: 0.75rem;
 }
 
+.drawer-danger-row .form-error {
+  margin: 0;
+}
+
 .conflict-box {
   margin-top: 1rem;
   padding: 1rem;
@@ -921,7 +946,7 @@ a {
 
 .dialog {
   position: relative;
-  width: min(440px, 100%);
+  width: min(500px, 100%);
   padding: 1.4rem;
   background: var(--panel);
   border: 1px solid var(--line-strong);
@@ -947,6 +972,97 @@ a {
   color: var(--muted);
   font-size: 0.8rem;
   line-height: 1.55;
+}
+
+.settings-section h3 {
+  margin: 1.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.trash-list {
+  display: grid;
+  gap: 0.6rem;
+  max-height: min(58vh, 480px);
+  overflow-y: auto;
+}
+
+.trash-item {
+  padding: 0.8rem;
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.trash-item-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.trash-item-heading > span {
+  padding: 0.16rem 0.35rem;
+  background: var(--sidebar);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 0.56rem;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.trash-item-heading strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-item > p {
+  margin: 0.35rem 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-item > time {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--faint);
+  font-size: 0.62rem;
+}
+
+.trash-actions,
+.trash-confirm > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.trash-confirm {
+  margin-top: 0.7rem;
+  padding: 0.65rem;
+  background: color-mix(in srgb, #923e38 10%, var(--panel));
+  border: 1px solid color-mix(in srgb, #923e38 42%, var(--line));
+  border-radius: 6px;
+  font-size: 0.7rem;
+}
+
+.trash-empty {
+  display: grid;
+  min-height: 150px;
+  place-content: center;
+  justify-items: center;
+  gap: 0.55rem;
+  color: var(--faint);
+  font-size: 0.75rem;
 }
 
 .participant-list {

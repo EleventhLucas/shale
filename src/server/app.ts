@@ -8,6 +8,7 @@ import {
   createParticipantInputSchema,
   createTagInputSchema,
   moveCardInputSchema,
+  trashTargetSchema,
   unlockInputSchema,
   updateCardInputSchema,
   updateCardTagsInputSchema,
@@ -21,7 +22,11 @@ import {
   getBootstrap,
   getCard,
   getParticipants,
+  getTrash,
   moveCard,
+  permanentlyDeleteEntity,
+  restoreEntity,
+  trashEntity,
   updateCardTags,
   updateTag,
 } from "./db";
@@ -235,6 +240,53 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
       }
       hub.publish({ resource: "card", id: cardId, revision: result.card.revision });
       return c.json(result.card);
+    },
+  );
+
+  app.get("/_shale/trash", auth.requireSession, (c) => c.json({ items: getTrash(db) }));
+
+  app.post(
+    "/_shale/trash/:type/:id",
+    auth.requireSession,
+    auth.requireParticipant,
+    zValidator("param", trashTargetSchema),
+    (c) => {
+      const target = c.req.valid("param");
+      const result = trashEntity(db, target.type, target.id);
+      if (result.status === "not_found") return c.json({ error: "Item not found." }, 404);
+      hub.publish({ resource: "board", id: target.id, revision: 0 });
+      return c.json({ ok: true });
+    },
+  );
+
+  app.post(
+    "/_shale/trash/:type/:id/restore",
+    auth.requireSession,
+    auth.requireParticipant,
+    zValidator("param", trashTargetSchema),
+    (c) => {
+      const target = c.req.valid("param");
+      const result = restoreEntity(db, target.type, target.id);
+      if (result.status === "not_found") return c.json({ error: "Item not found." }, 404);
+      if (result.status === "invalid_parent") {
+        return c.json({ error: "Restore its parent from Trash first." }, 409);
+      }
+      hub.publish({ resource: "board", id: target.id, revision: 0 });
+      return c.json({ ok: true });
+    },
+  );
+
+  app.delete(
+    "/_shale/trash/:type/:id",
+    auth.requireSession,
+    auth.requireParticipant,
+    zValidator("param", trashTargetSchema),
+    (c) => {
+      const target = c.req.valid("param");
+      const result = permanentlyDeleteEntity(db, target.type, target.id);
+      if (result.status === "not_found") return c.json({ error: "Item not found." }, 404);
+      hub.publish({ resource: "board", id: target.id, revision: 0 });
+      return c.json({ ok: true });
     },
   );
 

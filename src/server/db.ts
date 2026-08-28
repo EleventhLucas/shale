@@ -1,7 +1,15 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { BoardSnapshot, Bootstrap, Card, Participant, Tag } from "../shared/contracts";
+import type {
+  BoardSnapshot,
+  Bootstrap,
+  Card,
+  Participant,
+  Tag,
+  TrashItem,
+  TrashItemType,
+} from "../shared/contracts";
 
 type SqliteValue = string | number | bigint | boolean | Uint8Array | null;
 type Row = Record<string, SqliteValue>;
@@ -413,6 +421,319 @@ export function updateCardTags(
     );
     const updated = getCard(db, cardId);
     return updated ? { status: "ok", card: updated } : { status: "not_found" };
+  })();
+}
+
+export function getTrash(db: Database): TrashItem[] {
+  const workspaces = asRows(
+    db.query("SELECT id, name, trashed_at FROM workspaces WHERE trashed_at IS NOT NULL").all(),
+  ).map((row) => ({
+    id: String(row.id),
+    type: "workspace" as const,
+    name: String(row.name),
+    context: "Workspace",
+    trashedAt: String(row.trashed_at),
+  }));
+  const boards = asRows(
+    db
+      .query(
+        `SELECT boards.id, boards.name, boards.trashed_at, workspaces.name AS workspace_name
+        FROM boards JOIN workspaces ON workspaces.id = boards.workspace_id
+        WHERE boards.trashed_at IS NOT NULL AND workspaces.trashed_at IS NULL`,
+      )
+      .all(),
+  ).map((row) => ({
+    id: String(row.id),
+    type: "board" as const,
+    name: String(row.name),
+    context: String(row.workspace_name),
+    trashedAt: String(row.trashed_at),
+  }));
+  const columns = asRows(
+    db
+      .query(
+        `SELECT board_columns.id, board_columns.title, board_columns.trashed_at,
+          boards.name AS board_name, workspaces.name AS workspace_name
+        FROM board_columns
+        JOIN boards ON boards.id = board_columns.board_id
+        JOIN workspaces ON workspaces.id = boards.workspace_id
+        WHERE board_columns.trashed_at IS NOT NULL
+          AND boards.trashed_at IS NULL AND workspaces.trashed_at IS NULL`,
+      )
+      .all(),
+  ).map((row) => ({
+    id: String(row.id),
+    type: "column" as const,
+    name: String(row.title),
+    context: `${String(row.workspace_name)} / ${String(row.board_name)}`,
+    trashedAt: String(row.trashed_at),
+  }));
+  const cards = asRows(
+    db
+      .query(
+        `SELECT cards.id, cards.title, cards.trashed_at, board_columns.title AS column_title,
+          boards.name AS board_name, workspaces.name AS workspace_name
+        FROM cards
+        JOIN board_columns ON board_columns.id = cards.column_id
+        JOIN boards ON boards.id = board_columns.board_id
+        JOIN workspaces ON workspaces.id = boards.workspace_id
+        WHERE cards.trashed_at IS NOT NULL AND board_columns.trashed_at IS NULL
+          AND boards.trashed_at IS NULL AND workspaces.trashed_at IS NULL`,
+      )
+      .all(),
+  ).map((row) => ({
+    id: String(row.id),
+    type: "card" as const,
+    name: String(row.title),
+    context: `${String(row.workspace_name)} / ${String(row.board_name)} / ${String(row.column_title)}`,
+    trashedAt: String(row.trashed_at),
+  }));
+  return [...workspaces, ...boards, ...columns, ...cards].sort((left, right) =>
+    right.trashedAt.localeCompare(left.trashedAt),
+  );
+}
+
+export type TrashMutationResult =
+  | { status: "ok" }
+  | { status: "not_found" }
+  | { status: "invalid_parent" };
+
+function normalizeCardPositions(db: Database, columnId: string, timestamp: string): void {
+  const ids = asRows(
+    db
+      .query("SELECT id FROM cards WHERE column_id = ? AND trashed_at IS NULL ORDER BY position")
+      .all(columnId),
+  ).map((row) => String(row.id));
+  db.query(
+    "UPDATE cards SET position = position + 1000000 WHERE column_id = ? AND trashed_at IS NULL",
+  ).run(columnId);
+  const place = db.query(
+    "UPDATE cards SET position = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+  );
+  ids.forEach((id, position) => {
+    place.run(position, timestamp, id);
+  });
+}
+
+function normalizeColumnPositions(db: Database, boardId: string, timestamp: string): void {
+  const ids = asRows(
+    db
+      .query(
+        "SELECT id FROM board_columns WHERE board_id = ? AND trashed_at IS NULL ORDER BY position",
+      )
+      .all(boardId),
+  ).map((row) => String(row.id));
+  db.query(
+    "UPDATE board_columns SET position = position + 2000000 WHERE board_id = ? AND trashed_at IS NULL",
+  ).run(boardId);
+  const place = db.query(
+    "UPDATE board_columns SET position = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+  );
+  ids.forEach((columnId, position) => {
+    place.run(position, timestamp, columnId);
+  });
+}
+
+export function trashEntity(db: Database, type: TrashItemType, id: string): TrashMutationResult {
+  return db.transaction((): TrashMutationResult => {
+    const timestamp = now();
+    if (type === "card") {
+      const row = db
+        .query("SELECT column_id FROM cards WHERE id = ? AND trashed_at IS NULL")
+        .get(id) as Row | null;
+      if (!row) return { status: "not_found" };
+      db.query(
+        "UPDATE cards SET trashed_at = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+      ).run(timestamp, timestamp, id);
+      normalizeCardPositions(db, String(row.column_id), timestamp);
+      return { status: "ok" };
+    }
+    if (type === "column") {
+      const row = db
+        .query("SELECT board_id FROM board_columns WHERE id = ? AND trashed_at IS NULL")
+        .get(id) as Row | null;
+      if (!row) return { status: "not_found" };
+      const parkedPosition =
+        Number(
+          (
+            db
+              .query(
+                "SELECT COALESCE(MAX(position), 0) AS position FROM board_columns WHERE board_id = ?",
+              )
+              .get(row.board_id) as Row
+          ).position,
+        ) + 1_000_000;
+      db.query(
+        "UPDATE board_columns SET trashed_at = ?, position = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+      ).run(timestamp, parkedPosition, timestamp, id);
+      normalizeColumnPositions(db, String(row.board_id), timestamp);
+      return { status: "ok" };
+    }
+    const table = type === "workspace" ? "workspaces" : "boards";
+    const result = db
+      .query(
+        `UPDATE ${table} SET trashed_at = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND trashed_at IS NULL`,
+      )
+      .run(timestamp, timestamp, id);
+    return result.changes ? { status: "ok" } : { status: "not_found" };
+  })();
+}
+
+export function restoreEntity(db: Database, type: TrashItemType, id: string): TrashMutationResult {
+  return db.transaction((): TrashMutationResult => {
+    const timestamp = now();
+    if (type === "card") {
+      const row = db
+        .query(
+          `SELECT cards.column_id
+          FROM cards
+          JOIN board_columns ON board_columns.id = cards.column_id
+          JOIN boards ON boards.id = board_columns.board_id
+          JOIN workspaces ON workspaces.id = boards.workspace_id
+          WHERE cards.id = ? AND cards.trashed_at IS NOT NULL
+            AND board_columns.trashed_at IS NULL AND boards.trashed_at IS NULL
+            AND workspaces.trashed_at IS NULL`,
+        )
+        .get(id) as Row | null;
+      if (!row) {
+        return db.query("SELECT 1 FROM cards WHERE id = ? AND trashed_at IS NOT NULL").get(id)
+          ? { status: "invalid_parent" }
+          : { status: "not_found" };
+      }
+      const position = Number(
+        (
+          db
+            .query(
+              "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM cards WHERE column_id = ? AND trashed_at IS NULL",
+            )
+            .get(row.column_id) as Row
+        ).position,
+      );
+      db.query(
+        "UPDATE cards SET trashed_at = NULL, position = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+      ).run(position, timestamp, id);
+      return { status: "ok" };
+    }
+    if (type === "column") {
+      const row = db
+        .query(
+          `SELECT board_columns.board_id
+          FROM board_columns
+          JOIN boards ON boards.id = board_columns.board_id
+          JOIN workspaces ON workspaces.id = boards.workspace_id
+          WHERE board_columns.id = ? AND board_columns.trashed_at IS NOT NULL
+            AND boards.trashed_at IS NULL AND workspaces.trashed_at IS NULL`,
+        )
+        .get(id) as Row | null;
+      if (!row) {
+        return db
+          .query("SELECT 1 FROM board_columns WHERE id = ? AND trashed_at IS NOT NULL")
+          .get(id)
+          ? { status: "invalid_parent" }
+          : { status: "not_found" };
+      }
+      const position = Number(
+        (
+          db
+            .query(
+              "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM board_columns WHERE board_id = ? AND trashed_at IS NULL",
+            )
+            .get(row.board_id) as Row
+        ).position,
+      );
+      db.query(
+        "UPDATE board_columns SET trashed_at = NULL, position = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+      ).run(position, timestamp, id);
+      return { status: "ok" };
+    }
+    if (type === "board") {
+      const row = db
+        .query(
+          `SELECT boards.workspace_id FROM boards
+          JOIN workspaces ON workspaces.id = boards.workspace_id
+          WHERE boards.id = ? AND boards.trashed_at IS NOT NULL AND workspaces.trashed_at IS NULL`,
+        )
+        .get(id) as Row | null;
+      if (!row) {
+        return db.query("SELECT 1 FROM boards WHERE id = ? AND trashed_at IS NOT NULL").get(id)
+          ? { status: "invalid_parent" }
+          : { status: "not_found" };
+      }
+      const position = Number(
+        (
+          db
+            .query(
+              "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM boards WHERE workspace_id = ? AND trashed_at IS NULL",
+            )
+            .get(row.workspace_id) as Row
+        ).position,
+      );
+      db.query(
+        "UPDATE boards SET trashed_at = NULL, position = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+      ).run(position, timestamp, id);
+      return { status: "ok" };
+    }
+    const position = Number(
+      (
+        db
+          .query(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM workspaces WHERE trashed_at IS NULL",
+          )
+          .get() as Row
+      ).position,
+    );
+    const result = db
+      .query(
+        "UPDATE workspaces SET trashed_at = NULL, position = ?, revision = revision + 1, updated_at = ? WHERE id = ? AND trashed_at IS NOT NULL",
+      )
+      .run(position, timestamp, id);
+    return result.changes ? { status: "ok" } : { status: "not_found" };
+  })();
+}
+
+function permanentlyDeleteBoard(db: Database, boardId: string): void {
+  db.query(
+    "DELETE FROM cards WHERE column_id IN (SELECT id FROM board_columns WHERE board_id = ?)",
+  ).run(boardId);
+  db.query("DELETE FROM tags WHERE board_id = ?").run(boardId);
+  db.query("DELETE FROM board_columns WHERE board_id = ?").run(boardId);
+  db.query("DELETE FROM boards WHERE id = ?").run(boardId);
+}
+
+export function permanentlyDeleteEntity(
+  db: Database,
+  type: TrashItemType,
+  id: string,
+): TrashMutationResult {
+  return db.transaction((): TrashMutationResult => {
+    const table =
+      type === "workspace"
+        ? "workspaces"
+        : type === "board"
+          ? "boards"
+          : type === "column"
+            ? "board_columns"
+            : "cards";
+    if (!db.query(`SELECT 1 FROM ${table} WHERE id = ? AND trashed_at IS NOT NULL`).get(id)) {
+      return { status: "not_found" };
+    }
+    if (type === "workspace") {
+      const boardIds = asRows(db.query("SELECT id FROM boards WHERE workspace_id = ?").all(id)).map(
+        (row) => String(row.id),
+      );
+      boardIds.forEach((boardId) => {
+        permanentlyDeleteBoard(db, boardId);
+      });
+      db.query("DELETE FROM workspaces WHERE id = ?").run(id);
+    } else if (type === "board") {
+      permanentlyDeleteBoard(db, id);
+    } else if (type === "column") {
+      db.query("DELETE FROM cards WHERE column_id = ?").run(id);
+      db.query("DELETE FROM board_columns WHERE id = ?").run(id);
+    } else {
+      db.query("DELETE FROM cards WHERE id = ?").run(id);
+    }
+    return { status: "ok" };
   })();
 }
 

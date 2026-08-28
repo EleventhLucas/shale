@@ -221,4 +221,111 @@ describe("Shale vertical slice", () => {
     expect(liveCard).not.toHaveProperty("checklist");
     expect(liveCard).not.toHaveProperty("labels");
   });
+
+  it("restores and permanently deletes items through the recoverable trash", async () => {
+    const app = createApp(db, {
+      port: 3000,
+      dataDir: ".",
+      publicOrigin: origin,
+      sessionDays: 30,
+    });
+    const participantResponse = await app.request("/_shale/participants", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ displayName: "Trash Editor" }),
+    });
+    const participant = (await participantResponse.json()) as { id: string };
+    const mutationHeaders = {
+      origin,
+      "x-shale-participant": participant.id,
+    };
+
+    const initialTrash = (await (await app.request("/_shale/trash")).json()) as {
+      items: Array<{ id: string; type: string }>;
+    };
+    expect(
+      initialTrash.items.some((item) => item.id === "card-trashed-example" && item.type === "card"),
+    ).toBe(true);
+
+    const restored = await app.request("/_shale/trash/card/card-trashed-example/restore", {
+      method: "POST",
+      headers: mutationHeaders,
+    });
+    expect(restored.status).toBe(200);
+    const boardAfterRestore = (await (
+      await app.request("/_shale/boards/sample-workspace/sample-board")
+    ).json()) as { columns: Array<{ cards: Array<{ id: string }> }> };
+    expect(
+      boardAfterRestore.columns
+        .flatMap((column) => column.cards)
+        .some((card) => card.id === "card-trashed-example"),
+    ).toBe(true);
+
+    const trashedAgain = await app.request("/_shale/trash/card/card-trashed-example", {
+      method: "POST",
+      headers: mutationHeaders,
+    });
+    expect(trashedAgain.status).toBe(200);
+    const deleted = await app.request("/_shale/trash/card/card-trashed-example", {
+      method: "DELETE",
+      headers: mutationHeaders,
+    });
+    expect(deleted.status).toBe(200);
+    expect(db.query("SELECT 1 FROM cards WHERE id = ?").get("card-trashed-example")).toBeNull();
+
+    const trashedBoard = await app.request("/_shale/trash/board/sandbox-board", {
+      method: "POST",
+      headers: mutationHeaders,
+    });
+    expect(trashedBoard.status).toBe(200);
+    expect((await app.request("/_shale/boards/sample-workspace/sample-board")).status).toBe(404);
+    const restoredBoard = await app.request("/_shale/trash/board/sandbox-board/restore", {
+      method: "POST",
+      headers: mutationHeaders,
+    });
+    expect(restoredBoard.status).toBe(200);
+    expect((await app.request("/_shale/boards/sample-workspace/sample-board")).status).toBe(200);
+
+    const trashedColumn = await app.request("/_shale/trash/column/sandbox-progress", {
+      method: "POST",
+      headers: mutationHeaders,
+    });
+    expect(trashedColumn.status).toBe(200);
+    const boardWithoutColumn = (await (
+      await app.request("/_shale/boards/sample-workspace/sample-board")
+    ).json()) as { columns: Array<{ id: string; position: number }> };
+    expect(boardWithoutColumn.columns.map((column) => [column.id, column.position])).toEqual([
+      ["sandbox-backlog", 0],
+      ["sandbox-done", 1],
+    ]);
+    expect(
+      (
+        await app.request("/_shale/trash/column/sandbox-progress/restore", {
+          method: "POST",
+          headers: mutationHeaders,
+        })
+      ).status,
+    ).toBe(200);
+
+    expect(
+      (
+        await app.request("/_shale/trash/workspace/sandbox-workspace", {
+          method: "POST",
+          headers: mutationHeaders,
+        })
+      ).status,
+    ).toBe(200);
+    const bootstrapWhileTrashed = (await (await app.request("/_shale/bootstrap")).json()) as {
+      workspaces: unknown[];
+    };
+    expect(bootstrapWhileTrashed.workspaces).toEqual([]);
+    expect(
+      (
+        await app.request("/_shale/trash/workspace/sandbox-workspace/restore", {
+          method: "POST",
+          headers: mutationHeaders,
+        })
+      ).status,
+    ).toBe(200);
+  });
 });

@@ -104,6 +104,25 @@ export const updateCardTagsInputSchema = z.object({
   revision: z.number().int().positive(),
 });
 
+export const trashItemTypeSchema = z.enum(["workspace", "board", "column", "card"]);
+
+export const trashItemSchema = z.object({
+  id: idSchema,
+  type: trashItemTypeSchema,
+  name: z.string(),
+  context: z.string(),
+  trashedAt: z.string(),
+});
+
+export const trashSnapshotSchema = z.object({
+  items: z.array(trashItemSchema),
+});
+
+export const trashTargetSchema = z.object({
+  type: trashItemTypeSchema,
+  id: idSchema,
+});
+
 export const invalidationEventSchema = z.object({
   resource: z.enum(["board", "card", "participants", "session"]),
   id: idSchema,
@@ -112,6 +131,8 @@ export const invalidationEventSchema = z.object({
 
 export type Participant = z.infer<typeof participantSchema>;
 export type Tag = z.infer<typeof tagSchema>;
+export type TrashItem = z.infer<typeof trashItemSchema>;
+export type TrashItemType = z.infer<typeof trashItemTypeSchema>;
 export type Card = z.infer<typeof cardSchema>;
 export type Column = z.infer<typeof columnSchema>;
 export type Bootstrap = z.infer<typeof bootstrapSchema>;

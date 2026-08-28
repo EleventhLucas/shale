@@ -6,7 +6,9 @@ import {
   participantSchema,
   sessionStateSchema,
   type Tag,
+  type TrashItemType,
   tagSchema,
+  trashSnapshotSchema,
 } from "../shared/contracts";
 
 export class ApiError extends Error {
@@ -120,4 +122,31 @@ export const api = {
         body: JSON.stringify(input),
       }),
     ),
+  trash: async () => trashSnapshotSchema.parse(await request("/_shale/trash")),
+  moveToTrash: async (type: TrashItemType, id: string, participantId: string): Promise<void> => {
+    await request(`/_shale/trash/${type}/${encodeURIComponent(id)}`, {
+      method: "POST",
+      headers: { "x-shale-participant": participantId },
+    });
+  },
+  restoreFromTrash: async (
+    type: TrashItemType,
+    id: string,
+    participantId: string,
+  ): Promise<void> => {
+    await request(`/_shale/trash/${type}/${encodeURIComponent(id)}/restore`, {
+      method: "POST",
+      headers: { "x-shale-participant": participantId },
+    });
+  },
+  permanentlyDelete: async (
+    type: TrashItemType,
+    id: string,
+    participantId: string,
+  ): Promise<void> => {
+    await request(`/_shale/trash/${type}/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { "x-shale-participant": participantId },
+    });
+  },
 };

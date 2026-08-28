@@ -19,14 +19,14 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
   - Keep post-drop feedback stable; do not animate cards back toward their previous positions.
 - Cards support:
   - Title and GFM Markdown description.
-  - Multiple board-scoped text tags. Cards use removable tag badges and a searchable assignment picker; tag creation and renaming lives in board-level management.
+  - Multiple board-scoped text tags. Cards use removable tag badges and a searchable assignment picker; tag creation and renaming lives in a board settings modal opened from the sidebar.
   - Multiple assignees selected from the instance-wide participant list.
   - Timestamped plain-text comments with display-name attribution.
 - Ticket due dates and checklists are intentionally omitted. Scheduling belongs to boards and a future sprint-level model rather than individual tickets.
 - Title and description use an inline editing mode with explicit Save/Cancel so the card drawer retains its layout. Moves, tags, assignees, and comments persist immediately.
 - Open card details in a right-side drawer by default. Provide a control to switch between drawer and centered-modal presentation and remember that preference in the browser. Card URLs remain directly linkable in either presentation.
 - Show the board title once in the top breadcrumb bar, with a left-aligned board search toolbar below it. Search only the current board's card titles and descriptions. Filters cover tags, assignees, and unassigned cards. Combine categories with AND and selections within a category with OR.
-- Move workspaces, boards, columns, and cards to a recoverable trash. Retain trash indefinitely until an unlocked editor restores or explicitly permanently deletes it.
+- Move workspaces, boards, columns, and cards to a recoverable trash. A sidebar Trash panel lists recoverable items with restore controls and individually confirmed permanent deletion. Retain trash indefinitely until an unlocked editor restores or explicitly permanently deletes it.
 - Create a resettable Sample Workspace on a new database. Its Sample Board demonstrates columns, Markdown, editable tags, comments, filtering, trash, and drag-and-drop without adding fake participants. Reset affects only the marked sample workspace and requires confirmation.
 - Match Graphite's compact monochrome design family, including local fonts/icons, light and dark themes, a one-click theme toggle, clear focus states, and no remote assets.
 - Target current desktop Chrome, Edge, Firefox, and Safari. Keep narrow layouts readable with collapsible navigation and horizontally scrolling boards, but defer polished mobile and touch workflows.
