@@ -86,7 +86,7 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
   - Persist `/data` through a named or bind-mounted volume.
   - Include schema migrations, health checking, graceful shutdown, and a Compose example.
   - Support `SHALE_PORT`, `SHALE_DATA_DIR`, `SHALE_PASSWORD`/`SHALE_PASSWORD_FILE`, backup interval/retention, and an optional public-origin setting.
-- Publish versioned `ghcr.io/eleventhlucas/shale` Linux x64 images manually for releases. Do not promise arm64, AppImage, standalone Web hosting, or standalone binaries in 0.1.0.
+- Publish versioned Linux x64 container images manually to the configured registry. Do not promise arm64, AppImage, standalone Web hosting, or standalone binaries in 0.1.0.
 - Docker is not currently available on the planning machine. Document it as a release prerequisite and perform final container validation on a Linux x64 Docker host.
 - Add no telemetry, analytics, update checks, request/content logging, remote fonts, CDNs, or outbound background network activity.
 
@@ -106,7 +106,7 @@ Accounts, registration, per-user passwords, roles, private workspaces, SSO, Post
 ## Implementation Handoff
 
 - Repository state at approval: `main` contains no application scaffold; this plan was the only initial working-tree file.
-- Remote: `https://github.com/EleventhLucas/shale.git`.
+- Use the repository's configured Git remote; do not record maintainer-specific remote URLs here.
 - Available locally: Bun 1.3.14. Docker and Docker Compose are not currently discoverable and are required before container smoke testing.
 - The approved Git identity is recorded above and must be set repo-locally before the first commit.
 - Start with a thin vertical slice: repository baseline, Bun/Hono server, Vite/React shell, initial SQLite migration, seeded sandbox board, public board read, shared-password unlock, one card mutation, and live invalidation between two browser sessions.
