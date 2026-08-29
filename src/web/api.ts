@@ -1,4 +1,6 @@
 import {
+  type BoardExport,
+  boardExportSchema,
   boardSnapshotSchema,
   bootstrapSchema,
   type Card,
@@ -69,7 +71,12 @@ export const api = {
     ),
   updateParticipant: async (
     participantId: string,
-    input: { displayName: string; revision: number },
+    input: {
+      displayName: string;
+      avatarDataUrl?: string | null;
+      color?: TagColor;
+      revision: number;
+    },
   ) =>
     participantSchema.parse(
       await request(`/_shale/participants/${encodeURIComponent(participantId)}`, {
@@ -80,6 +87,14 @@ export const api = {
   deleteParticipant: async (participantId: string): Promise<void> => {
     await request(`/_shale/participants/${encodeURIComponent(participantId)}`, {
       method: "DELETE",
+    });
+  },
+  exportBoard: async (boardId: string): Promise<BoardExport> =>
+    boardExportSchema.parse(await request(`/_shale/board-files/${encodeURIComponent(boardId)}`)),
+  importBoard: async (boardId: string, data: BoardExport): Promise<void> => {
+    await request(`/_shale/board-files/${encodeURIComponent(boardId)}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
     });
   },
   updateCard: async (

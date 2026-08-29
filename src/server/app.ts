@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
 import {
+  boardExportSchema,
   createParticipantInputSchema,
   createTagInputSchema,
   moveCardInputSchema,
@@ -22,11 +23,13 @@ import {
   createTag,
   deleteParticipant,
   deleteTag,
+  exportBoard,
   getBoard,
   getBootstrap,
   getCard,
   getParticipants,
   getTrash,
+  importBoard,
   moveCard,
   permanentlyDeleteEntity,
   restoreEntity,
@@ -103,6 +106,29 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
     return board ? c.json(board) : c.json({ error: "Board not found." }, 404);
   });
 
+  app.get("/_shale/board-files/:boardId", auth.requireSession, (c) => {
+    const exported = exportBoard(db, c.req.param("boardId"));
+    if (!exported) return c.json({ error: "Board not found." }, 404);
+    c.header("Content-Disposition", `attachment; filename="shale-board.json"`);
+    return c.json(exported);
+  });
+
+  app.put(
+    "/_shale/board-files/:boardId",
+    auth.requireSession,
+    zValidator("json", boardExportSchema),
+    (c) => {
+      const result = importBoard(db, c.req.param("boardId"), c.req.valid("json"));
+      if (result.status === "not_found") return c.json({ error: "Board not found." }, 404);
+      if (result.status === "invalid_data") {
+        return c.json({ error: "This Shale board file contains invalid references." }, 400);
+      }
+      hub.publish({ resource: "board", id: c.req.param("boardId"), revision: 0 });
+      hub.publish({ resource: "participants", id: c.req.param("boardId"), revision: 0 });
+      return c.json({ ok: true });
+    },
+  );
+
   app.get("/_shale/participants", (c) => c.json({ participants: getParticipants(db) }));
 
   app.post(
@@ -115,6 +141,8 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
         id: randomUUID(),
         displayName,
         active: true,
+        avatarDataUrl: null,
+        color: "#6b6b68" as const,
         revision: 1,
       };
       const timestamp = new Date().toISOString();
@@ -141,6 +169,8 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
         c.req.param("participantId"),
         input.displayName,
         normalizeName(input.displayName),
+        input.avatarDataUrl,
+        input.color,
         input.revision,
       );
       if (result.status === "not_found") return c.json({ error: "Person not found." }, 404);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  boardExportSchema,
   createParticipantInputSchema,
   createTagInputSchema,
   moveCardInputSchema,
@@ -81,5 +82,37 @@ describe("shared input contracts", () => {
     expect(() =>
       updateTagInputSchema.parse({ name: "Review", color: "violet", revision: 2 }),
     ).toThrow();
+  });
+
+  it("validates local person profile pictures and board files", () => {
+    expect(
+      updateParticipantInputSchema.parse({
+        displayName: "Avery",
+        avatarDataUrl: "data:image/png;base64,AA==",
+        color: "#A1B2C3",
+        revision: 3,
+      }),
+    ).toEqual({
+      displayName: "Avery",
+      avatarDataUrl: "data:image/png;base64,AA==",
+      color: "#a1b2c3",
+      revision: 3,
+    });
+    expect(() =>
+      updateParticipantInputSchema.parse({
+        displayName: "Avery",
+        avatarDataUrl: "https://example.test/avatar.png",
+        color: "#a1b2c3",
+        revision: 3,
+      }),
+    ).toThrow();
+    expect(
+      boardExportSchema.parse({
+        format: "shale-board",
+        version: 1,
+        exportedAt: "2026-08-29T12:00:00.000Z",
+        board: { name: "Portable board", tags: [], people: [], columns: [] },
+      }),
+    ).toMatchObject({ format: "shale-board", version: 1 });
   });
 });

@@ -2,18 +2,28 @@ import { z } from "zod";
 
 export const idSchema = z.string().min(1).max(100);
 
+export const hexColorSchema = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/, "Choose a valid six-digit hex color.")
+  .transform((color) => color.toLowerCase());
+
+export const avatarDataUrlSchema = z
+  .string()
+  .max(400_000)
+  .regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/)
+  .nullable();
+
 export const participantSchema = z.object({
   id: idSchema,
   displayName: z.string().trim().min(1).max(80),
   active: z.boolean(),
+  avatarDataUrl: avatarDataUrlSchema,
+  color: hexColorSchema,
   revision: z.number().int().positive(),
 });
 
 export const defaultTagColor = "#6b6b68";
-export const tagColorSchema = z
-  .string()
-  .regex(/^#[0-9a-fA-F]{6}$/, "Choose a valid six-digit hex color.")
-  .transform((color) => color.toLowerCase());
+export const tagColorSchema = hexColorSchema;
 
 export const tagSchema = z.object({
   id: idSchema,
@@ -84,7 +94,60 @@ export const createParticipantInputSchema = z.object({
 
 export const updateParticipantInputSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
+  avatarDataUrl: avatarDataUrlSchema.optional(),
+  color: hexColorSchema.optional(),
   revision: z.number().int().positive(),
+});
+
+const exportedCommentSchema = z.object({
+  authorParticipantId: idSchema.nullable(),
+  authorName: z.string().trim().min(1).max(80),
+  body: z.string().max(50_000),
+  createdAt: z.string().datetime(),
+});
+
+const exportedCardSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  description: z.string().max(50_000),
+  tagIds: z.array(idSchema).max(50),
+  assigneeIds: z.array(idSchema).max(50),
+  comments: z.array(exportedCommentSchema).max(1_000),
+});
+
+export const boardExportSchema = z.object({
+  format: z.literal("shale-board"),
+  version: z.literal(1),
+  exportedAt: z.string().datetime(),
+  board: z.object({
+    name: z.string().trim().min(1).max(200),
+    tags: z
+      .array(
+        z.object({
+          id: idSchema,
+          name: z.string().trim().min(1).max(40),
+          color: tagColorSchema,
+        }),
+      )
+      .max(500),
+    people: z
+      .array(
+        z.object({
+          id: idSchema,
+          displayName: z.string().trim().min(1).max(80),
+          avatarDataUrl: avatarDataUrlSchema,
+          color: hexColorSchema,
+        }),
+      )
+      .max(1_000),
+    columns: z
+      .array(
+        z.object({
+          title: z.string().trim().min(1).max(200),
+          cards: z.array(exportedCardSchema).max(10_000),
+        }),
+      )
+      .max(500),
+  }),
 });
 
 export const updateCardInputSchema = z.object({
@@ -153,6 +216,7 @@ export const invalidationEventSchema = z.object({
 });
 
 export type Participant = z.infer<typeof participantSchema>;
+export type BoardExport = z.infer<typeof boardExportSchema>;
 export type Tag = z.infer<typeof tagSchema>;
 export type TagColor = z.infer<typeof tagColorSchema>;
 export type TrashItem = z.infer<typeof trashItemSchema>;

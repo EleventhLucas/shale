@@ -25,6 +25,7 @@ describe("Shale vertical slice", () => {
 
     const publicRead = await app.request("/_shale/boards/sample-workspace/sample-board");
     expect(publicRead.status).toBe(200);
+    expect((await app.request("/_shale/board-files/sandbox-board")).status).toBe(401);
 
     const lockedMutation = await app.request("/_shale/cards/card-welcome", {
       method: "PATCH",
@@ -41,6 +42,13 @@ describe("Shale vertical slice", () => {
     expect(unlock.status).toBe(200);
     const cookie = unlock.headers.get("set-cookie")?.split(";")[0];
     expect(cookie).toBeTruthy();
+    expect(
+      (
+        await app.request("/_shale/board-files/sandbox-board", {
+          headers: { cookie: cookie as string },
+        })
+      ).status,
+    ).toBe(200);
 
     const updated = await app.request("/_shale/cards/card-welcome", {
       method: "PATCH",
@@ -221,10 +229,20 @@ describe("Shale vertical slice", () => {
     const renamedPerson = await app.request(`/_shale/participants/${participant.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", origin },
-      body: JSON.stringify({ displayName: "Board Visitor", revision: participant.revision }),
+      body: JSON.stringify({
+        displayName: "Board Visitor",
+        avatarDataUrl: "data:image/png;base64,AA==",
+        color: "#376b52",
+        revision: participant.revision,
+      }),
     });
     expect(renamedPerson.status).toBe(200);
-    expect(await renamedPerson.json()).toMatchObject({ displayName: "Board Visitor", revision: 2 });
+    expect(await renamedPerson.json()).toMatchObject({
+      displayName: "Board Visitor",
+      avatarDataUrl: "data:image/png;base64,AA==",
+      color: "#376b52",
+      revision: 2,
+    });
 
     const snapshot = (await (
       await app.request("/_shale/boards/sample-workspace/sample-board")
@@ -268,6 +286,142 @@ describe("Shale vertical slice", () => {
       afterDeletes.columns.flatMap((column) => column.cards).find((card) => card.id === "card-live")
         ?.assigneeIds,
     ).toEqual([]);
+  });
+
+  it("exports and transactionally replaces the current board", async () => {
+    const app = createApp(db, {
+      port: 3000,
+      dataDir: ".",
+      publicOrigin: origin,
+      sessionDays: 30,
+    });
+    const createdPerson = await app.request("/_shale/participants", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ displayName: "Portable Person" }),
+    });
+    const person = (await createdPerson.json()) as { id: string };
+    const assigned = await app.request("/_shale/cards/card-welcome/assignees", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ assigneeIds: [person.id], revision: 1 }),
+    });
+    expect(assigned.status).toBe(200);
+
+    const exportedResponse = await app.request("/_shale/board-files/sandbox-board");
+    expect(exportedResponse.status).toBe(200);
+    const exported = (await exportedResponse.json()) as {
+      format: string;
+      version: number;
+      board: {
+        name: string;
+        tags: Array<{ id: string }>;
+        people: Array<{ id: string }>;
+        columns: unknown[];
+      };
+    };
+    expect(exported).toMatchObject({
+      format: "shale-board",
+      version: 1,
+      board: { name: "Sample Board" },
+    });
+    expect(exported.board.people.map((item) => item.id)).toContain(person.id);
+
+    const rejectedImport = await app.request("/_shale/board-files/sandbox-board", {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({
+        ...exported,
+        board: {
+          ...exported.board,
+          columns: [
+            {
+              title: "Broken import",
+              cards: [
+                {
+                  title: "Missing tag reference",
+                  description: "",
+                  tagIds: ["missing-tag"],
+                  assigneeIds: [],
+                  comments: [],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    });
+    expect(rejectedImport.status).toBe(400);
+    expect(
+      (
+        (await (await app.request("/_shale/boards/sample-workspace/sample-board")).json()) as {
+          columns: Array<{ cards: Array<{ id: string }> }>;
+        }
+      ).columns
+        .flatMap((column) => column.cards)
+        .some((card) => card.id === "card-welcome"),
+    ).toBe(true);
+
+    const importedFile = {
+      ...exported,
+      board: {
+        ...exported.board,
+        name: "Imported Board",
+        columns: [
+          {
+            title: "Imported column",
+            cards: [
+              {
+                title: "Imported card",
+                description: "Portable Markdown",
+                tagIds: [exported.board.tags[0].id],
+                assigneeIds: [person.id],
+                comments: [],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const importedResponse = await app.request("/_shale/board-files/sandbox-board", {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify(importedFile),
+    });
+    expect(importedResponse.status).toBe(200);
+
+    const board = (await (
+      await app.request("/_shale/boards/sample-workspace/sample-board")
+    ).json()) as {
+      board: { name: string };
+      columns: Array<{
+        id: string;
+        title: string;
+        position: number;
+        revision: number;
+        cards: Array<{ title: string; assigneeIds: string[] }>;
+      }>;
+    };
+    expect(board.board.name).toBe("Imported Board");
+    expect(board.columns).toEqual([
+      {
+        id: expect.any(String),
+        title: "Imported column",
+        position: 0,
+        revision: 1,
+        cards: [
+          expect.objectContaining({
+            title: "Imported card",
+            assigneeIds: [person.id],
+          }),
+        ],
+      },
+    ]);
+    expect(
+      board.columns
+        .flatMap((column) => column.cards)
+        .some((card) => card.title === "Explore the sample board"),
+    ).toBe(false);
   });
 
   it("restores and permanently deletes items through the recoverable trash", async () => {

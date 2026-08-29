@@ -7,7 +7,7 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 - The primary deliverable is one Linux x64 Docker image serving both the backend and Web UI.
 - Anyone with the unlisted URL can read boards. Editing requires a host-configured shared password
   when one is configured; without one, the instance is publicly editable.
-- There are no user accounts or roles. The shared password is the front door: everyone inside has equal editing capabilities. A browser may optionally select a person only for assignment shortcuts such as Assign to me.
+- There are no user accounts or roles. The shared password is the front door: everyone inside has equal editing capabilities. A browser may optionally select a person only for assignment shortcuts such as Add me.
 - SQLite is the only database. PostgreSQL, public APIs, plugins, integrations, and hosted-service functionality are deferred.
 - The application remains focused on creating boards, adding cards, and moving work forward.
 
@@ -20,7 +20,7 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 - Cards support:
   - Title and GFM Markdown description.
   - Multiple board-scoped text tags with editable names and colors. The Tags settings category offers useful presets, a full color picker, and deletion; edits save automatically without per-tag save buttons. Cards use removable tag badges and a searchable assignment picker.
-  - Multiple assignees selected from the instance-wide Persons list, including an optional browser-local Assign to me shortcut.
+  - Multiple assignees selected from the instance-wide Persons list, including an optional browser-local Add me shortcut that disappears when the selected person is already assigned.
   - Timestamped plain-text comments with display-name attribution.
 - Ticket due dates and checklists are intentionally omitted. Scheduling belongs to boards and a future sprint-level model rather than individual tickets.
 - Title and description use an inline editing mode with explicit Save/Cancel so the card drawer retains its layout. Moves, tags, assignees, and comments persist immediately.
@@ -28,7 +28,9 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 - Show the board title once in the top breadcrumb bar, with a left-aligned board search toolbar below it. Search only the current board's card titles and descriptions. Filters cover tags, assignees, and unassigned cards. Combine categories with AND and selections within a category with OR.
 - Move workspaces, boards, columns, and cards to a recoverable trash. A sidebar Trash panel lists recoverable items with restore controls and individually confirmed permanent deletion. Retain trash indefinitely until an unlocked editor restores or explicitly permanently deletes it.
 - Create a resettable Sample Workspace on a new database. Its Sample Board demonstrates columns, Markdown, editable tags, comments, filtering, trash, and drag-and-drop without adding fake participants. Reset affects only the marked sample workspace and requires confirmation.
-- Match Graphite's compact monochrome design family, including local fonts/icons, light and dark themes, clear focus states, and no remote assets. A categorized settings modal opens to Appearance, where one theme toggle lives; Tags contains board tag management and Persons contains instance-wide assignment-person management.
+- Match Graphite's compact monochrome design family, including local fonts/icons, light and dark themes, clear focus states, and no remote assets. A top-aligned categorized settings modal opens to Appearance, where one theme toggle lives; Tags contains board tag management and Persons contains instance-wide assignment-person management.
+- Give people optional locally stored profile pictures. Resize uploads before saving them and automatically derive each person's accent color from the image's dominant shade; do not expose a manual person-color picker.
+- Put edit-gated board export and import controls in the left sidebar. Export a versioned Shale JSON file containing the board's active columns, cards, tags, assignments, referenced people, and comments. Import replaces the current board transactionally after an explicit destructive confirmation while preserving its workspace and URL.
 - Target current desktop Chrome, Edge, Firefox, and Safari. Keep narrow layouts readable with collapsible navigation and horizontally scrolling boards, but defer polished mobile and touch workflows.
 
 ## Architecture, Data, and Security
@@ -45,8 +47,9 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 - Deliver live collaboration through Server-Sent Events. Events carry resource identifiers and revisions, not full content; clients invalidate affected queries. Reconnecting or missing events triggers a normal refetch.
 - Treat person records as optional assignment identity, not authentication or edit attribution:
   - Require only the shared edit session for mutations; never require a selected person to edit.
-  - Store an optionally selected person ID in browser-local state for Assign to me.
-  - Allow unlocked editors to choose, add, rename, or delete people in the Persons settings category.
+  - Store an optionally selected person ID in browser-local state for Add me.
+  - Choose that identity from a searchable person dropdown; creating people belongs only in the Persons settings category.
+  - Allow unlocked editors to add, rename, update profile pictures for, or delete people in the Persons settings category.
   - Enforce non-empty, case-insensitively unique display names.
   - Removing a person clears their card assignments while preserving any plain-text comment author name.
 - Protect mutations and operational actions with the shared gateway when a password is configured:
@@ -62,7 +65,7 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
   - Retain 14 snapshots by default; make interval and retention configurable.
   - Write snapshots through a temporary file and atomic rename under `${SHALE_DATA_DIR}/backups`.
   - Provide an edit-gated manual SQLite download.
-  - Document restoration by stopping Shale and replacing the database; do not add in-app restore or JSON export in v1.
+  - Document full-instance restoration by stopping Shale and replacing the database. Board-level JSON import/export is intentionally separate from SQLite disaster-recovery backups.
 - No public API is introduced. The React client uses undocumented same-origin routes with shared TypeScript/Zod schemas for entities, mutation results, conflicts, authentication state, backup metadata, and realtime invalidations. These routes are not a supported integration contract.
 
 ## Repository and Distribution
@@ -86,8 +89,8 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 
 ## Test and Acceptance Plan
 
-- Unit-test validation, natural ordering, board search/filter combinations, Markdown sanitization, person uniqueness/deletion, revisions, session expiry/password rotation, trash restoration, sample reset boundaries, and backup retention.
-- Integration-test migrations and CRUD against temporary SQLite databases, transactional card movement, concurrent revision conflicts, cascading trash/restore, consistent live-database snapshots, and SSE invalidation delivery.
+- Unit-test validation, natural ordering, board search/filter combinations, Markdown sanitization, person profiles/uniqueness/deletion, board-file schemas, revisions, session expiry/password rotation, trash restoration, sample reset boundaries, and backup retention.
+- Integration-test migrations and CRUD against temporary SQLite databases, transactional card movement and board replacement, board export, concurrent revision conflicts, cascading trash/restore, consistent live-database snapshots, and SSE invalidation delivery.
 - Component-test public read mode, unlock and optional identity prompts, board navigation, card drawer/modal switching, assignments, explicit text saves, immediate card controls, filters, theme behavior, trash, and accessible focus states.
 - Use browser tests for pointer and keyboard card movement, deep-linked cards, simultaneous sessions receiving live changes, conflict recovery, sample reset, and persisted browser preferences.
 - Add a bounded Docker smoke test using a temporary volume: start the image with a test password, wait for `/healthz`, confirm the sandbox board renders, unlock editing, perform one card mutation, restart the container, and confirm persistence without touching tracked files.
@@ -95,7 +98,7 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 
 ## Explicitly Deferred
 
-Accounts, registration, per-user passwords, roles, private workspaces, SSO, PostgreSQL, public APIs, plugins, webhooks, imports, JSON export, attachments, notifications, activity history, full-text/global search, cross-board card movement, recurring tasks, WIP limits, roadmaps, CRM, time tracking, budgeting, docs, chat, whiteboards, PWA/offline editing, polished mobile support, horizontal scaling, desktop wrappers, AppImage, and hosted-service operations.
+Accounts, registration, per-user passwords, roles, private workspaces, SSO, PostgreSQL, public APIs, plugins, webhooks, general attachments, notifications, activity history, full-text/global search, cross-board card movement, recurring tasks, WIP limits, roadmaps, CRM, time tracking, budgeting, docs, chat, whiteboards, PWA/offline editing, polished mobile support, horizontal scaling, desktop wrappers, AppImage, and hosted-service operations.
 
 ## Implementation Handoff
 

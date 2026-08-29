@@ -22,6 +22,8 @@ import {
   Check,
   ChevronLeft,
   CircleUserRound,
+  Download,
+  ImagePlus,
   LockKeyhole,
   Menu,
   Moon,
@@ -32,6 +34,7 @@ import {
   Sun,
   Trash2,
   UnlockKeyhole,
+  Upload,
   X,
 } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
@@ -40,6 +43,7 @@ import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import type {
+  BoardExport,
   BoardSnapshot,
   Card,
   Column,
@@ -48,7 +52,7 @@ import type {
   TagColor,
   TrashItem,
 } from "../shared/contracts";
-import { defaultTagColor } from "../shared/contracts";
+import { boardExportSchema, defaultTagColor } from "../shared/contracts";
 import { ApiError, api } from "./api";
 import { Button } from "./components/button";
 
@@ -65,6 +69,77 @@ const tagColorOptions: Array<{ value: TagColor; label: string }> = [
 
 function tagColorStyle(color: TagColor): CSSProperties {
   return { "--tag-color": color } as CSSProperties;
+}
+
+function personColorStyle(color: TagColor): CSSProperties {
+  return { "--person-color": color } as CSSProperties;
+}
+
+function PersonAvatar({ person, className = "" }: { person: Participant; className?: string }) {
+  return (
+    <span
+      className={`person-avatar ${className}`.trim()}
+      style={personColorStyle(person.color)}
+      aria-hidden="true"
+    >
+      {person.avatarDataUrl ? (
+        <img src={person.avatarDataUrl} alt="" />
+      ) : (
+        person.displayName.slice(0, 1).toUpperCase()
+      )}
+    </span>
+  );
+}
+
+async function preparePersonAvatar(
+  file: File,
+): Promise<{ avatarDataUrl: string; color: TagColor }> {
+  if (!(["image/png", "image/jpeg", "image/webp"] as string[]).includes(file.type)) {
+    throw new Error("Choose a PNG, JPEG, or WebP image.");
+  }
+  if (file.size > 5_000_000) throw new Error("Profile pictures must be smaller than 5 MB.");
+
+  const image = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    image.close();
+    throw new Error("This browser could not prepare the profile picture.");
+  }
+  const scale = Math.max(canvas.width / image.width, canvas.height / image.height);
+  const width = image.width * scale;
+  const height = image.height * scale;
+  context.drawImage(image, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
+  image.close();
+
+  const buckets = new Map<string, { count: number; red: number; green: number; blue: number }>();
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  for (let index = 0; index < pixels.length; index += 16) {
+    if (pixels[index + 3] < 128) continue;
+    const red = pixels[index];
+    const green = pixels[index + 1];
+    const blue = pixels[index + 2];
+    const key = `${red >> 5}-${green >> 5}-${blue >> 5}`;
+    const bucket = buckets.get(key) ?? { count: 0, red: 0, green: 0, blue: 0 };
+    bucket.count += 1;
+    bucket.red += red;
+    bucket.green += green;
+    bucket.blue += blue;
+    buckets.set(key, bucket);
+  }
+  const dominant = [...buckets.values()].sort((left, right) => right.count - left.count)[0];
+  const channel = (value: number) =>
+    Math.round(value / dominant.count)
+      .toString(16)
+      .padStart(2, "0");
+  const color = dominant
+    ? (`#${channel(dominant.red)}${channel(dominant.green)}${channel(dominant.blue)}` as TagColor)
+    : defaultTagColor;
+  const avatarDataUrl = canvas.toDataURL("image/webp", 0.82);
+  if (avatarDataUrl.length > 400_000) throw new Error("The prepared profile picture is too large.");
+  return { avatarDataUrl, color };
 }
 
 function TagColorField({
@@ -252,6 +327,9 @@ function BoardPage({
   const [search, setSearch] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [pendingImport, setPendingImport] = useState<{ fileName: string; data: BoardExport }>();
+  const [boardFileError, setBoardFileError] = useState<string>();
+  const importInput = useRef<HTMLInputElement>(null);
   const [activeCardId, setActiveCardId] = useState<string>();
   const [moveError, setMoveError] = useState<string>();
   const sensors = useSensors(
@@ -269,6 +347,39 @@ function BoardPage({
     onSuccess: (data) => queryClient.setQueryData(["session"], data),
   });
   const boardKey = ["board", workspaceSlug, boardSlug] as const;
+  const exportFile = useMutation({
+    mutationFn: () => api.exportBoard(board.data?.board.id ?? ""),
+    onSuccess: (data) => {
+      setBoardFileError(undefined);
+      const blob = new Blob([`${JSON.stringify(data, null, 2)}\n`], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${
+        data.board.name
+          .toLocaleLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "") || "shale-board"
+      }.shale.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    },
+    onError: (error) => setBoardFileError(error.message),
+  });
+  const importFile = useMutation({
+    mutationFn: (data: BoardExport) => api.importBoard(board.data?.board.id ?? "", data),
+    onSuccess: async () => {
+      setPendingImport(undefined);
+      setBoardFileError(undefined);
+      navigate(`/w/${workspaceSlug}/b/${boardSlug}`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: boardKey }),
+        queryClient.invalidateQueries({ queryKey: ["bootstrap"] }),
+      ]);
+    },
+  });
   const move = useMutation<
     Card,
     Error,
@@ -352,6 +463,20 @@ function BoardPage({
     requestMove(dragged, targetColumn.id, Math.max(0, targetPosition));
   }
 
+  async function chooseImportFile(file: File | undefined): Promise<void> {
+    if (!file) return;
+    setBoardFileError(undefined);
+    try {
+      if (file.size > 10_000_000) throw new Error("Board files must be smaller than 10 MB.");
+      const data = boardExportSchema.parse(JSON.parse(await file.text()));
+      setPendingImport({ fileName: file.name, data });
+    } catch (error) {
+      setBoardFileError(
+        error instanceof Error ? error.message : "That is not a valid Shale board file.",
+      );
+    }
+  }
+
   if (board.isLoading || bootstrap.isLoading) return <LoadingScreen />;
   if (board.error || !board.data) return <EmptyState message="That board could not be found." />;
 
@@ -383,6 +508,38 @@ function BoardPage({
           ))}
         </nav>
         <div className="sidebar-footer">
+          <input
+            ref={importInput}
+            className="sr-only"
+            type="file"
+            accept=".json,.shale.json,application/json"
+            aria-label="Choose a Shale board file to import"
+            onChange={(event) => {
+              void chooseImportFile(event.target.files?.[0]);
+              event.currentTarget.value = "";
+            }}
+          />
+          <button
+            type="button"
+            aria-label="Import board"
+            title="Import board"
+            onClick={() => {
+              if (requestEditing()) importInput.current?.click();
+            }}
+          >
+            <Upload size={17} />
+          </button>
+          <button
+            type="button"
+            aria-label="Export board"
+            title="Export board"
+            disabled={exportFile.isPending}
+            onClick={() => {
+              if (requestEditing()) exportFile.mutate();
+            }}
+          >
+            <Download size={17} />
+          </button>
           <button
             type="button"
             aria-label="Open Trash"
@@ -401,6 +558,16 @@ function BoardPage({
           >
             <Settings size={17} />
           </button>
+          {boardFileError && (
+            <span
+              className="sidebar-file-error"
+              role="alert"
+              aria-label={boardFileError}
+              title={boardFileError}
+            >
+              !
+            </span>
+          )}
         </div>
       </aside>
 
@@ -423,7 +590,12 @@ function BoardPage({
             {session.data?.unlocked ? (
               <>
                 <Button variant="quiet" size="small" onClick={openIdentity}>
-                  <CircleUserRound size={16} /> {participant?.displayName ?? "Choose person"}
+                  {participant ? (
+                    <PersonAvatar person={participant} />
+                  ) : (
+                    <CircleUserRound size={16} />
+                  )}
+                  {participant?.displayName ?? "Choose person"}
                 </Button>
                 {session.data.passwordRequired ? (
                   <Button variant="quiet" size="small" onClick={() => lock.mutate()}>
@@ -515,6 +687,19 @@ function BoardPage({
         <TrashDialog
           boardKey={["board", workspaceSlug, boardSlug]}
           onClose={() => setTrashOpen(false)}
+        />
+      )}
+      {pendingImport && (
+        <ImportBoardDialog
+          currentBoardName={board.data.board.name}
+          fileName={pendingImport.fileName}
+          importedBoardName={pendingImport.data.board.name}
+          isPending={importFile.isPending}
+          error={importFile.error?.message}
+          onClose={() => {
+            if (!importFile.isPending) setPendingImport(undefined);
+          }}
+          onConfirm={() => importFile.mutate(pendingImport.data)}
         />
       )}
     </div>
@@ -655,7 +840,7 @@ function CardContent({ card, people }: { card: Card; people: Participant[] }) {
         <div className="card-assignees">
           {assignees.map((person) => (
             <span className="card-assignee" title={person.displayName} key={person.id}>
-              {person.displayName.slice(0, 1).toUpperCase()}
+              <PersonAvatar person={person} />
               <span>{person.displayName}</span>
             </span>
           ))}
@@ -1062,7 +1247,7 @@ function CardAssigneePicker({
       <div className="drawer-assignees">
         {assignedPeople.map((person) => (
           <span className="person-badge person-badge--removable" key={person.id}>
-            <i aria-hidden="true">{person.displayName.slice(0, 1).toUpperCase()}</i>
+            <PersonAvatar person={person} />
             {person.displayName}
             <button
               type="button"
@@ -1076,15 +1261,17 @@ function CardAssigneePicker({
             </button>
           </span>
         ))}
-        <Button
-          variant="quiet"
-          size="small"
-          type="button"
-          disabled={assign.isPending || Boolean(participant && assigned.has(participant.id))}
-          onClick={assignToMe}
-        >
-          <CircleUserRound size={14} /> Assign to me
-        </Button>
+        {(!participant || !assigned.has(participant.id)) && (
+          <Button
+            variant="quiet"
+            size="small"
+            type="button"
+            disabled={assign.isPending}
+            onClick={assignToMe}
+          >
+            <CircleUserRound size={14} /> Add me
+          </Button>
+        )}
         <details className="tag-picker">
           <summary>
             <Plus size={13} /> Add person
@@ -1112,9 +1299,7 @@ function CardAssigneePicker({
                     if (details) details.open = false;
                   }}
                 >
-                  <i className="person-dot" aria-hidden="true">
-                    {person.displayName.slice(0, 1).toUpperCase()}
-                  </i>
+                  <PersonAvatar person={person} className="person-dot" />
                   {person.displayName}
                 </button>
               ))}
@@ -1235,12 +1420,24 @@ function PersonManagerRow({ person, boardKey }: { person: Participant; boardKey:
   const queryClient = useQueryClient();
   const [displayName, setDisplayName] = useState(person.displayName);
   const [failedSignature, setFailedSignature] = useState<string>();
+  const [avatarError, setAvatarError] = useState<string>();
   const previousPerson = useRef(person);
   const update = useMutation({
-    mutationFn: ({ name, revision }: { name: string; revision: number; signature: string }) =>
-      api.updateParticipant(person.id, { displayName: name, revision }),
+    mutationFn: ({
+      name,
+      revision,
+      avatarDataUrl,
+      color,
+    }: {
+      name: string;
+      revision: number;
+      signature: string;
+      avatarDataUrl?: string | null;
+      color?: TagColor;
+    }) => api.updateParticipant(person.id, { displayName: name, avatarDataUrl, color, revision }),
     onSuccess: async () => {
       setFailedSignature(undefined);
+      setAvatarError(undefined);
       await queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
     },
     onError: async (_error, variables) => {
@@ -1281,31 +1478,89 @@ function PersonManagerRow({ person, boardKey }: { person: Participant; boardKey:
     return () => window.clearTimeout(timeout);
   }, [persist]);
 
+  async function selectAvatar(file: File | undefined): Promise<void> {
+    if (!file || isPending) return;
+    setAvatarError(undefined);
+    try {
+      const profile = await preparePersonAvatar(file);
+      mutate({
+        name: displayName.trim() || person.displayName,
+        revision: person.revision,
+        signature: `avatar-${file.name}-${file.lastModified}`,
+        ...profile,
+      });
+    } catch (error) {
+      setAvatarError(error instanceof Error ? error.message : "Could not prepare that image.");
+    }
+  }
+
   return (
-    <div className="person-manager-row">
-      <input
-        className="tag-name-input"
-        value={displayName}
-        maxLength={80}
-        aria-label={`Rename ${person.displayName}`}
-        onBlur={persist}
-        onChange={(event) => {
-          if (!isPending) reset();
-          setFailedSignature(undefined);
-          setDisplayName(event.target.value);
-        }}
-      />
-      <Button
-        variant="quiet"
-        size="icon"
-        type="button"
-        aria-label={`Delete ${person.displayName}`}
-        title={`Delete ${person.displayName}`}
-        disabled={remove.isPending}
-        onClick={() => remove.mutate()}
-      >
-        <Trash2 size={15} />
-      </Button>
+    <div className="person-manager-entry">
+      <div className="person-manager-row">
+        <div className="person-avatar-controls">
+          <label
+            className="person-avatar-upload"
+            title={`Upload a picture for ${person.displayName}`}
+          >
+            <PersonAvatar person={person} />
+            <ImagePlus size={12} />
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              aria-label={`Upload a profile picture for ${person.displayName}`}
+              disabled={isPending}
+              onChange={(event) => {
+                void selectAvatar(event.target.files?.[0]);
+                event.currentTarget.value = "";
+              }}
+            />
+          </label>
+          {person.avatarDataUrl && (
+            <button
+              className="person-avatar-remove"
+              type="button"
+              aria-label={`Remove ${person.displayName}'s profile picture`}
+              title="Remove profile picture"
+              disabled={isPending}
+              onClick={() =>
+                mutate({
+                  name: displayName.trim() || person.displayName,
+                  avatarDataUrl: null,
+                  color: defaultTagColor,
+                  revision: person.revision,
+                  signature: `remove-avatar-${person.revision}`,
+                })
+              }
+            >
+              <X size={10} />
+            </button>
+          )}
+        </div>
+        <input
+          className="tag-name-input"
+          value={displayName}
+          maxLength={80}
+          aria-label={`Rename ${person.displayName}`}
+          onBlur={persist}
+          onChange={(event) => {
+            if (!isPending) reset();
+            setFailedSignature(undefined);
+            setDisplayName(event.target.value);
+          }}
+        />
+        <Button
+          variant="quiet"
+          size="icon"
+          type="button"
+          aria-label={`Delete ${person.displayName}`}
+          title={`Delete ${person.displayName}`}
+          disabled={remove.isPending}
+          onClick={() => remove.mutate()}
+        >
+          <Trash2 size={15} />
+        </Button>
+      </div>
+      {avatarError && <p className="person-avatar-error">{avatarError}</p>}
     </div>
   );
 }
@@ -1354,7 +1609,7 @@ function SettingsDialog({
   });
 
   return (
-    <Dialog title="Settings" onClose={onClose}>
+    <Dialog title="Settings" onClose={onClose} alignTop>
       <div className="settings-tabs" role="tablist" aria-label="Settings categories">
         <button
           id="settings-appearance-tab"
@@ -1490,6 +1745,45 @@ function SettingsDialog({
           {createPerson.error && <p className="form-error">{createPerson.error.message}</p>}
         </section>
       )}
+    </Dialog>
+  );
+}
+
+function ImportBoardDialog({
+  currentBoardName,
+  importedBoardName,
+  fileName,
+  isPending,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  currentBoardName: string;
+  importedBoardName: string;
+  fileName: string;
+  isPending: boolean;
+  error?: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog title="Replace this board?" onClose={onClose}>
+      <div className="import-warning">
+        <strong>This import cannot be undone.</strong>
+        <p>
+          <b>{fileName}</b> will replace every column, card, tag, assignment, and comment on
+          {` ${currentBoardName}`}. The board will be renamed to {importedBoardName}.
+        </p>
+      </div>
+      {error && <p className="form-error">{error}</p>}
+      <div className="dialog-actions">
+        <Button type="button" variant="quiet" disabled={isPending} onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="button" disabled={isPending} onClick={onConfirm}>
+          <Upload size={15} /> {isPending ? "Replacing…" : "Replace board"}
+        </Button>
+      </div>
     </Dialog>
   );
 }
@@ -1651,58 +1945,50 @@ function IdentityDialog({
   onClose: () => void;
   onSelect: (id: string) => void;
 }) {
-  const queryClient = useQueryClient();
-  const [displayName, setDisplayName] = useState("");
-  const create = useMutation({
-    mutationFn: api.createParticipant,
-    onSuccess: (participant) => {
-      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
-      onSelect(participant.id);
-    },
-  });
+  const [query, setQuery] = useState("");
+  const matching = participants.filter((participant) =>
+    participant.displayName.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
+  );
   return (
     <Dialog title="Choose yourself" onClose={onClose}>
       <p className="dialog-copy">
-        This is optional and only powers shortcuts such as Assign to me. It does not change edit
-        access.
+        This is optional and only powers shortcuts such as Add me. It does not change edit access.
       </p>
-      {participants.length > 0 && (
-        <div className="participant-list">
-          {participants.map((participant) => (
-            <button type="button" key={participant.id} onClick={() => onSelect(participant.id)}>
-              <span>{participant.displayName.slice(0, 1).toUpperCase()}</span>
-              {participant.displayName}
-            </button>
-          ))}
+      <details className="identity-picker">
+        <summary>
+          <CircleUserRound size={16} /> Select a person
+        </summary>
+        <div className="identity-picker-menu">
+          <label className="search-box identity-search">
+            <Search size={15} />
+            <span className="sr-only">Search people</span>
+            <input
+              value={query}
+              placeholder="Search people"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <div className="participant-list">
+            {matching.map((participant) => (
+              <button type="button" key={participant.id} onClick={() => onSelect(participant.id)}>
+                <PersonAvatar person={participant} />
+                {participant.displayName}
+              </button>
+            ))}
+            {participants.length === 0 && (
+              <span className="identity-empty">Add people from Settings first.</span>
+            )}
+            {participants.length > 0 && matching.length === 0 && (
+              <span className="identity-empty">No matching people.</span>
+            )}
+          </div>
         </div>
-      )}
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          create.mutate(displayName);
-        }}
-      >
-        <label className="field-label" htmlFor="display-name">
-          {participants.length ? "Or add a person" : "Add a person"}
-        </label>
-        <input
-          className="text-input"
-          id="display-name"
-          value={displayName}
-          maxLength={80}
-          autoFocus
-          onChange={(event) => setDisplayName(event.target.value)}
-        />
-        {create.error && <p className="form-error">{create.error.message}</p>}
-        <div className="dialog-actions">
-          <Button type="button" variant="quiet" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={!displayName.trim() || create.isPending}>
-            Add name
-          </Button>
-        </div>
-      </form>
+      </details>
+      <div className="dialog-actions">
+        <Button type="button" variant="quiet" onClick={onClose}>
+          Cancel
+        </Button>
+      </div>
     </Dialog>
   );
 }
@@ -1710,14 +1996,19 @@ function IdentityDialog({
 function Dialog({
   title,
   onClose,
+  alignTop = false,
   children,
 }: {
   title: string;
   onClose: () => void;
+  alignTop?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div className="dialog-layer" role="presentation">
+    <div
+      className={alignTop ? "dialog-layer dialog-layer--top" : "dialog-layer"}
+      role="presentation"
+    >
       <button className="dialog-scrim" type="button" onClick={onClose} aria-label="Close dialog" />
       <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
         <div className="dialog-heading">

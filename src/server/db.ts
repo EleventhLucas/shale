@@ -1,7 +1,9 @@
 import { Database } from "bun:sqlite";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
+  BoardExport,
   BoardSnapshot,
   Bootstrap,
   Card,
@@ -11,7 +13,7 @@ import type {
   TrashItem,
   TrashItemType,
 } from "../shared/contracts";
-import { defaultTagColor, tagColorSchema } from "../shared/contracts";
+import { defaultTagColor, hexColorSchema, tagColorSchema } from "../shared/contracts";
 
 type SqliteValue = string | number | bigint | boolean | Uint8Array | null;
 type Row = Record<string, SqliteValue>;
@@ -43,6 +45,11 @@ function tagColorFromRow(value: SqliteValue): TagColor {
   const color = String(value);
   const parsed = tagColorSchema.safeParse(color);
   return parsed.success ? parsed.data : (legacyTagColors[color] ?? defaultTagColor);
+}
+
+function colorFromRow(value: SqliteValue): TagColor {
+  const parsed = hexColorSchema.safeParse(String(value));
+  return parsed.success ? parsed.data : defaultTagColor;
 }
 
 export function openDatabase(dataDir: string): Database {
@@ -189,13 +196,15 @@ export function getParticipants(db: Database): Participant[] {
   return asRows(
     db
       .query(
-        "SELECT id, display_name, active, revision FROM participants ORDER BY display_name COLLATE NOCASE",
+        "SELECT id, display_name, active, avatar_data_url, color, revision FROM participants ORDER BY display_name COLLATE NOCASE",
       )
       .all(),
   ).map((row) => ({
     id: String(row.id),
     displayName: String(row.display_name),
     active: Boolean(row.active),
+    avatarDataUrl: row.avatar_data_url === null ? null : String(row.avatar_data_url),
+    color: colorFromRow(row.color),
     revision: Number(row.revision),
   }));
 }
@@ -211,16 +220,22 @@ export function updateParticipant(
   participantId: string,
   displayName: string,
   normalizedName: string,
+  avatarDataUrl: string | null | undefined,
+  color: TagColor | undefined,
   revision: number,
 ): UpdateParticipantResult {
   const row = db
-    .query("SELECT id, display_name, active, revision FROM participants WHERE id = ?")
+    .query(
+      "SELECT id, display_name, active, avatar_data_url, color, revision FROM participants WHERE id = ?",
+    )
     .get(participantId) as Row | null;
   if (!row) return { status: "not_found" };
   const current = {
     id: String(row.id),
     displayName: String(row.display_name),
     active: Boolean(row.active),
+    avatarDataUrl: row.avatar_data_url === null ? null : String(row.avatar_data_url),
+    color: colorFromRow(row.color),
     revision: Number(row.revision),
   };
   if (current.revision !== revision) return { status: "conflict", participant: current };
@@ -228,17 +243,32 @@ export function updateParticipant(
     const result = db
       .query(
         `UPDATE participants
-        SET display_name = ?, normalized_name = ?, revision = revision + 1, updated_at = ?
+        SET display_name = ?, normalized_name = ?, avatar_data_url = ?, color = ?,
+          revision = revision + 1, updated_at = ?
         WHERE id = ? AND revision = ?`,
       )
-      .run(displayName, normalizedName, now(), participantId, revision);
+      .run(
+        displayName,
+        normalizedName,
+        avatarDataUrl === undefined ? current.avatarDataUrl : avatarDataUrl,
+        color ?? current.color,
+        now(),
+        participantId,
+        revision,
+      );
     if (result.changes === 0) return { status: "conflict", participant: current };
   } catch {
     return { status: "duplicate" };
   }
   return {
     status: "ok",
-    participant: { ...current, displayName, revision: revision + 1 },
+    participant: {
+      ...current,
+      displayName,
+      avatarDataUrl: avatarDataUrl === undefined ? current.avatarDataUrl : avatarDataUrl,
+      color: color ?? current.color,
+      revision: revision + 1,
+    },
   };
 }
 
@@ -407,6 +437,242 @@ export function getCard(db: Database, cardId: string): Card | null {
     )
     .get(cardId) as Row | null;
   return row ? cardFromRow(db, row) : null;
+}
+
+export function exportBoard(db: Database, boardId: string): BoardExport | null {
+  const board = db
+    .query("SELECT id, name FROM boards WHERE id = ? AND trashed_at IS NULL")
+    .get(boardId) as Row | null;
+  if (!board) return null;
+
+  const tags = asRows(
+    db.query("SELECT id, name, color FROM tags WHERE board_id = ? ORDER BY position").all(boardId),
+  ).map((row) => ({
+    id: String(row.id),
+    name: String(row.name),
+    color: tagColorFromRow(row.color),
+  }));
+  const personIds = new Set<string>();
+  const columns = asRows(
+    db
+      .query(
+        "SELECT id, title FROM board_columns WHERE board_id = ? AND trashed_at IS NULL ORDER BY position",
+      )
+      .all(boardId),
+  ).map((column) => ({
+    title: String(column.title),
+    cards: asRows(
+      db
+        .query(
+          "SELECT id, title, description FROM cards WHERE column_id = ? AND trashed_at IS NULL ORDER BY position",
+        )
+        .all(column.id),
+    ).map((card) => {
+      const tagIds = asRows(
+        db.query("SELECT label_id FROM card_tags WHERE card_id = ? ORDER BY label_id").all(card.id),
+      ).map((row) => String(row.label_id));
+      const assigneeIds = asRows(
+        db
+          .query(
+            "SELECT participant_id FROM card_assignees WHERE card_id = ? ORDER BY participant_id",
+          )
+          .all(card.id),
+      ).map((row) => {
+        const id = String(row.participant_id);
+        personIds.add(id);
+        return id;
+      });
+      const comments = asRows(
+        db
+          .query(
+            `SELECT author_participant_id, author_name, body, created_at
+            FROM comments WHERE card_id = ? ORDER BY created_at, id`,
+          )
+          .all(card.id),
+      ).map((row) => {
+        const authorParticipantId =
+          row.author_participant_id === null ? null : String(row.author_participant_id);
+        if (authorParticipantId) personIds.add(authorParticipantId);
+        return {
+          authorParticipantId,
+          authorName: String(row.author_name),
+          body: String(row.body),
+          createdAt: String(row.created_at),
+        };
+      });
+      return {
+        title: String(card.title),
+        description: String(card.description),
+        tagIds,
+        assigneeIds,
+        comments,
+      };
+    }),
+  }));
+  const people = getParticipants(db)
+    .filter((person) => personIds.has(person.id))
+    .map(({ id, displayName, avatarDataUrl, color }) => ({
+      id,
+      displayName,
+      avatarDataUrl,
+      color,
+    }));
+
+  return {
+    format: "shale-board",
+    version: 1,
+    exportedAt: now(),
+    board: { name: String(board.name), tags, people, columns },
+  };
+}
+
+export type ImportBoardResult =
+  | { status: "ok" }
+  | { status: "not_found" }
+  | { status: "invalid_data" };
+
+function normalizedPersonName(value: string): string {
+  return value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
+}
+
+export function importBoard(db: Database, boardId: string, input: BoardExport): ImportBoardResult {
+  const board = db.query("SELECT id FROM boards WHERE id = ? AND trashed_at IS NULL").get(boardId);
+  if (!board) return { status: "not_found" };
+
+  const tagIds = new Set<string>();
+  const tagNames = new Set<string>();
+  for (const tag of input.board.tags) {
+    const normalized = tag.name.toLocaleLowerCase();
+    if (tagIds.has(tag.id) || tagNames.has(normalized)) return { status: "invalid_data" };
+    tagIds.add(tag.id);
+    tagNames.add(normalized);
+  }
+  const personIds = new Set<string>();
+  const personNames = new Set<string>();
+  for (const person of input.board.people) {
+    const normalized = normalizedPersonName(person.displayName);
+    if (personIds.has(person.id) || personNames.has(normalized)) return { status: "invalid_data" };
+    personIds.add(person.id);
+    personNames.add(normalized);
+  }
+  for (const column of input.board.columns) {
+    for (const card of column.cards) {
+      if (
+        new Set(card.tagIds).size !== card.tagIds.length ||
+        new Set(card.assigneeIds).size !== card.assigneeIds.length ||
+        card.tagIds.some((id) => !tagIds.has(id)) ||
+        card.assigneeIds.some((id) => !personIds.has(id)) ||
+        card.comments.some(
+          (comment) =>
+            comment.authorParticipantId !== null && !personIds.has(comment.authorParticipantId),
+        )
+      ) {
+        return { status: "invalid_data" };
+      }
+    }
+  }
+
+  return db.transaction((): ImportBoardResult => {
+    const importedPeople = new Map<string, string>();
+    const timestamp = now();
+    for (const person of input.board.people) {
+      const normalized = normalizedPersonName(person.displayName);
+      const existing = db
+        .query("SELECT id FROM participants WHERE normalized_name = ?")
+        .get(normalized) as Row | null;
+      if (existing) {
+        importedPeople.set(person.id, String(existing.id));
+      } else {
+        const id = randomUUID();
+        db.query(
+          `INSERT INTO participants
+          (id, display_name, normalized_name, active, avatar_data_url, color, created_at, updated_at)
+          VALUES (?, ?, ?, 1, ?, ?, ?, ?)`,
+        ).run(
+          id,
+          person.displayName,
+          normalized,
+          person.avatarDataUrl,
+          person.color,
+          timestamp,
+          timestamp,
+        );
+        importedPeople.set(person.id, id);
+      }
+    }
+
+    const boardCardIds = `SELECT cards.id FROM cards
+      JOIN board_columns ON board_columns.id = cards.column_id
+      WHERE board_columns.board_id = ?`;
+    db.query(`DELETE FROM comments WHERE card_id IN (${boardCardIds})`).run(boardId);
+    db.query(`DELETE FROM card_assignees WHERE card_id IN (${boardCardIds})`).run(boardId);
+    db.query(`DELETE FROM card_tags WHERE card_id IN (${boardCardIds})`).run(boardId);
+    db.query(`DELETE FROM cards WHERE id IN (${boardCardIds})`).run(boardId);
+    db.query("DELETE FROM board_columns WHERE board_id = ?").run(boardId);
+    db.query("DELETE FROM tags WHERE board_id = ?").run(boardId);
+
+    const importedTags = new Map<string, string>();
+    input.board.tags.forEach((tag, position) => {
+      const id = randomUUID();
+      db.query("INSERT INTO tags (id, board_id, name, color, position) VALUES (?, ?, ?, ?, ?)").run(
+        id,
+        boardId,
+        tag.name,
+        tag.color,
+        position,
+      );
+      importedTags.set(tag.id, id);
+    });
+
+    input.board.columns.forEach((column, columnPosition) => {
+      const columnId = randomUUID();
+      db.query(
+        `INSERT INTO board_columns
+        (id, board_id, title, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(columnId, boardId, column.title, columnPosition, timestamp, timestamp);
+      column.cards.forEach((card, cardPosition) => {
+        const cardId = randomUUID();
+        db.query(
+          `INSERT INTO cards
+          (id, column_id, title, description, position, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(cardId, columnId, card.title, card.description, cardPosition, timestamp, timestamp);
+        for (const oldTagId of card.tagIds) {
+          db.query("INSERT INTO card_tags (card_id, label_id) VALUES (?, ?)").run(
+            cardId,
+            importedTags.get(oldTagId) as string,
+          );
+        }
+        for (const oldPersonId of card.assigneeIds) {
+          db.query("INSERT INTO card_assignees (card_id, participant_id) VALUES (?, ?)").run(
+            cardId,
+            importedPeople.get(oldPersonId) as string,
+          );
+        }
+        for (const comment of card.comments) {
+          db.query(
+            `INSERT INTO comments
+            (id, card_id, author_participant_id, author_name, body, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          ).run(
+            randomUUID(),
+            cardId,
+            comment.authorParticipantId
+              ? (importedPeople.get(comment.authorParticipantId) ?? null)
+              : null,
+            comment.authorName,
+            comment.body,
+            comment.createdAt,
+            comment.createdAt,
+          );
+        }
+      });
+    });
+    db.query(
+      "UPDATE boards SET name = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+    ).run(input.board.name, timestamp, boardId);
+    return { status: "ok" };
+  })();
 }
 
 export type CreateTagResult =
