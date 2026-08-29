@@ -1,16 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
   boardExportSchema,
+  boardSlugSchema,
+  createColumnInputSchema,
   createParticipantInputSchema,
   createTagInputSchema,
   moveCardInputSchema,
   updateCardAssigneesInputSchema,
   updateCardInputSchema,
+  updateColumnInputSchema,
   updateParticipantInputSchema,
   updateTagInputSchema,
 } from "../../src/shared/contracts";
 
 describe("shared input contracts", () => {
+  it("validates board URL slugs and column names", () => {
+    expect(boardSlugSchema.parse("release-planning-2")).toBe("release-planning-2");
+    expect(createColumnInputSchema.parse({ title: "  Review  " })).toEqual({ title: "Review" });
+    expect(updateColumnInputSchema.parse({ title: "Done", revision: 2 })).toEqual({
+      title: "Done",
+      revision: 2,
+    });
+    expect(() => boardSlugSchema.parse("Release Planning")).toThrow();
+    expect(() => boardSlugSchema.parse("double--hyphen")).toThrow();
+    expect(() => createColumnInputSchema.parse({ title: "   " })).toThrow();
+  });
+
   it("trims person names and rejects empty names", () => {
     expect(createParticipantInputSchema.parse({ displayName: "  Avery  " })).toEqual({
       displayName: "Avery",

@@ -8,15 +8,18 @@ import {
   boardExportSchema,
   createBoardInputSchema,
   createCardInputSchema,
+  createColumnInputSchema,
   createParticipantInputSchema,
   createTagInputSchema,
   moveCardInputSchema,
   trashTargetSchema,
   unlockInputSchema,
   updateBoardInputSchema,
+  updateBoardSlugInputSchema,
   updateCardAssigneesInputSchema,
   updateCardInputSchema,
   updateCardTagsInputSchema,
+  updateColumnInputSchema,
   updateParticipantInputSchema,
   updateTagInputSchema,
 } from "../shared/contracts";
@@ -25,12 +28,14 @@ import type { AppConfig } from "./config";
 import {
   createBoard,
   createCard,
+  createColumn,
   createTag,
   deleteParticipant,
   deleteTag,
   exportBoard,
   getBoard,
   getBoardById,
+  getBoardBySlug,
   getBootstrap,
   getCard,
   getParticipants,
@@ -41,8 +46,10 @@ import {
   restoreEntity,
   trashEntity,
   updateBoard,
+  updateBoardSlug,
   updateCardAssignees,
   updateCardTags,
+  updateColumn,
   updateParticipant,
   updateTag,
 } from "./db";
@@ -113,8 +120,9 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
     return board ? c.json(board) : c.json({ error: "Board not found." }, 404);
   });
 
-  app.get("/_shale/board/:boardId", (c) => {
-    const board = getBoardById(db, c.req.param("boardId"));
+  app.get("/_shale/board/:boardReference", (c) => {
+    const reference = c.req.param("boardReference");
+    const board = getBoardBySlug(db, reference) ?? getBoardById(db, reference);
     return board ? c.json(board) : c.json({ error: "Board not found." }, 404);
   });
 
@@ -123,9 +131,19 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
     auth.requireSession,
     zValidator("json", createBoardInputSchema),
     (c) => {
-      const board = createBoard(db, randomUUID(), c.req.valid("json").name);
-      hub.publish({ resource: "board", id: board.id, revision: board.revision });
-      return c.json(board, 201);
+      const result = createBoard(db, randomUUID(), c.req.valid("json").name);
+      if (result.status === "duplicate_name") {
+        return c.json({ error: "A board with that name already exists." }, 409);
+      }
+      if (result.status === "duplicate_slug") {
+        return c.json({ error: "That board name would reuse an existing board URL." }, 409);
+      }
+      hub.publish({
+        resource: "board",
+        id: result.board.id,
+        revision: result.board.revision,
+      });
+      return c.json(result.board, 201);
     },
   );
 
@@ -137,6 +155,9 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
       const input = c.req.valid("json");
       const result = updateBoard(db, c.req.param("boardId"), input.name, input.revision);
       if (result.status === "not_found") return c.json({ error: "Board not found." }, 404);
+      if (result.status === "duplicate_name") {
+        return c.json({ error: "A board with that name already exists." }, 409);
+      }
       if (result.status === "conflict") {
         return c.json(
           { error: "This board changed since Settings opened.", current: result.board },
@@ -145,6 +166,64 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
       }
       hub.publish({ resource: "board", id: result.board.id, revision: result.board.revision });
       return c.json(result.board);
+    },
+  );
+
+  app.patch(
+    "/_shale/boards/:boardId/slug",
+    auth.requireSession,
+    zValidator("json", updateBoardSlugInputSchema),
+    (c) => {
+      const input = c.req.valid("json");
+      const result = updateBoardSlug(db, c.req.param("boardId"), input.slug, input.revision);
+      if (result.status === "not_found") return c.json({ error: "Board not found." }, 404);
+      if (result.status === "duplicate") {
+        return c.json({ error: "That board URL is already in use." }, 409);
+      }
+      if (result.status === "conflict") {
+        return c.json(
+          { error: "This board changed before its URL was updated.", current: result.board },
+          409,
+        );
+      }
+      hub.publish({ resource: "board", id: result.board.id, revision: result.board.revision });
+      return c.json(result.board);
+    },
+  );
+
+  app.post(
+    "/_shale/boards/:boardId/columns",
+    auth.requireSession,
+    zValidator("json", createColumnInputSchema),
+    (c) => {
+      const column = createColumn(
+        db,
+        randomUUID(),
+        c.req.param("boardId"),
+        c.req.valid("json").title,
+      );
+      if (!column) return c.json({ error: "Board not found." }, 404);
+      hub.publish({ resource: "board", id: c.req.param("boardId"), revision: 0 });
+      return c.json(column, 201);
+    },
+  );
+
+  app.patch(
+    "/_shale/columns/:columnId",
+    auth.requireSession,
+    zValidator("json", updateColumnInputSchema),
+    (c) => {
+      const input = c.req.valid("json");
+      const result = updateColumn(db, c.req.param("columnId"), input.title, input.revision);
+      if (result.status === "not_found") return c.json({ error: "Column not found." }, 404);
+      if (result.status === "conflict") {
+        return c.json(
+          { error: "This column changed before its name was saved.", current: result.column },
+          409,
+        );
+      }
+      hub.publish({ resource: "board", id: result.column.id, revision: result.column.revision });
+      return c.json(result.column);
     },
   );
 
@@ -181,6 +260,9 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
     (c) => {
       const result = importBoard(db, c.req.param("boardId"), c.req.valid("json"));
       if (result.status === "not_found") return c.json({ error: "Board not found." }, 404);
+      if (result.status === "duplicate_name") {
+        return c.json({ error: "A board with that imported name already exists." }, 409);
+      }
       if (result.status === "invalid_data") {
         return c.json({ error: "This Shale board file contains invalid references." }, 400);
       }

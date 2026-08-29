@@ -5,7 +5,9 @@ import {
   boardSummarySchema,
   bootstrapSchema,
   type Card,
+  type Column,
   cardSchema,
+  columnSchema,
   participantSchema,
   sessionStateSchema,
   type Tag,
@@ -57,8 +59,8 @@ export const api = {
   lock: async () =>
     sessionStateSchema.parse(await request("/_shale/session", { method: "DELETE" })),
   bootstrap: async () => bootstrapSchema.parse(await request("/_shale/bootstrap")),
-  board: async (boardId: string) =>
-    boardSnapshotSchema.parse(await request(`/_shale/board/${encodeURIComponent(boardId)}`)),
+  board: async (boardReference: string) =>
+    boardSnapshotSchema.parse(await request(`/_shale/board/${encodeURIComponent(boardReference)}`)),
   createBoard: async (name: string) =>
     boardSummarySchema.parse(
       await request("/_shale/boards", { method: "POST", body: JSON.stringify({ name }) }),
@@ -66,6 +68,30 @@ export const api = {
   updateBoard: async (boardId: string, input: { name: string; revision: number }) =>
     boardSummarySchema.parse(
       await request(`/_shale/boards/${encodeURIComponent(boardId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }),
+    ),
+  updateBoardSlug: async (boardId: string, input: { slug: string; revision: number }) =>
+    boardSummarySchema.parse(
+      await request(`/_shale/boards/${encodeURIComponent(boardId)}/slug`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }),
+    ),
+  createColumn: async (boardId: string, title: string): Promise<Column> =>
+    columnSchema.parse(
+      await request(`/_shale/boards/${encodeURIComponent(boardId)}/columns`, {
+        method: "POST",
+        body: JSON.stringify({ title }),
+      }),
+    ),
+  updateColumn: async (
+    columnId: string,
+    input: { title: string; revision: number },
+  ): Promise<Column> =>
+    columnSchema.parse(
+      await request(`/_shale/columns/${encodeURIComponent(columnId)}`, {
         method: "PATCH",
         body: JSON.stringify(input),
       }),

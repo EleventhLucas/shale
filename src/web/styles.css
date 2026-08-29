@@ -309,6 +309,12 @@ a {
   padding: 1.25rem 2.25rem;
 }
 
+.board-query-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
 .search-box {
   display: flex;
   width: min(310px, 32vw);
@@ -342,6 +348,145 @@ a {
   border-radius: 4px;
   color: var(--faint);
   font-size: 0.62rem;
+}
+
+.board-filter {
+  position: relative;
+}
+
+.board-filter > summary {
+  list-style: none;
+}
+
+.board-filter > summary::-webkit-details-marker {
+  display: none;
+}
+
+.board-filter-toggle {
+  display: flex;
+  min-height: 41px;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0 0.75rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.73rem;
+  font-weight: 680;
+}
+
+.board-filter-toggle:hover,
+.board-filter-toggle:focus-visible,
+.board-filter[open] .board-filter-toggle {
+  border-color: var(--line-strong);
+  color: var(--ink);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+.board-filter-toggle--active {
+  color: var(--ink);
+}
+
+.board-filter-toggle > span {
+  display: grid;
+  min-width: 19px;
+  height: 19px;
+  place-items: center;
+  background: var(--ink);
+  border-radius: 999px;
+  color: var(--panel);
+  font-size: 0.62rem;
+}
+
+.board-filter-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 0.45rem);
+  left: 0;
+  width: min(290px, calc(100vw - 2rem));
+  max-height: min(62vh, 480px);
+  padding: 0.75rem;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  box-shadow: var(--shadow);
+}
+
+.board-filter-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+  font-size: 0.76rem;
+}
+
+.board-filter-heading button {
+  padding: 0.2rem 0.35rem;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.68rem;
+}
+
+.board-filter-heading button:hover,
+.board-filter-heading button:focus-visible {
+  color: var(--ink);
+  outline: 1px solid var(--line-strong);
+  border-radius: 4px;
+}
+
+.board-filter fieldset {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.board-filter fieldset + fieldset {
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
+}
+
+.board-filter legend {
+  margin-bottom: 0.35rem;
+  color: var(--faint);
+  font-size: 0.62rem;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.board-filter fieldset label {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.25rem 0.35rem;
+  border-radius: 5px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.73rem;
+}
+
+.board-filter fieldset label:hover {
+  background: var(--sidebar);
+}
+
+.board-filter fieldset input {
+  accent-color: var(--ink);
+}
+
+.board-filter-empty {
+  padding: 0.35rem;
+  color: var(--faint);
+  font-size: 0.68rem;
 }
 
 .board-scroll {
@@ -387,6 +532,29 @@ a {
   padding: 0.9rem 0.9rem 0.75rem;
 }
 
+.column-title-input {
+  min-width: 0;
+  width: 100%;
+  padding: 0.25rem 0.35rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--ink);
+  outline: none;
+  font-size: 0.76rem;
+  font-weight: 750;
+  letter-spacing: 0.015em;
+}
+
+.column-title-input:not([readonly]):hover {
+  border-color: var(--line);
+}
+
+.column-title-input:not([readonly]):focus {
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
 .column-heading h2 {
   margin: 0;
   font-size: 0.76rem;
@@ -421,6 +589,28 @@ a {
 .column-heading-actions button:hover,
 .column-heading-actions button:focus-visible {
   background: var(--panel-strong);
+  color: var(--ink);
+  outline: 1px solid var(--line-strong);
+}
+
+.column--add {
+  min-height: 76px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: row;
+  gap: 0.5rem;
+  background: transparent;
+  border-style: dashed;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 680;
+}
+
+.column--add:hover,
+.column--add:focus-visible {
+  border-color: var(--line-strong);
   color: var(--ink);
   outline: 1px solid var(--line-strong);
 }
@@ -536,6 +726,13 @@ a {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.board-filter .person-avatar {
+  width: 22px;
+  height: 22px;
+  flex-basis: 22px;
+  font-size: 0.58rem;
 }
 
 .tag-row,
@@ -1290,6 +1487,72 @@ a {
   text-transform: uppercase;
 }
 
+.misc-url-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-top: 0.9rem;
+  padding: 0.75rem;
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.misc-url-row > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.35rem;
+}
+
+.misc-url-row span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 720;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.misc-url-row code {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slug-input-row {
+  display: flex;
+  align-items: center;
+  margin-top: 0.4rem;
+  background: var(--panel-strong);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.slug-input-row:focus-within {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+.slug-input-row > span {
+  padding-left: 0.75rem;
+  color: var(--faint);
+  font-family: monospace;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.slug-input-row .text-input {
+  min-width: 0;
+  padding-left: 0.15rem;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  font-family: monospace;
+}
+
 .trash-list {
   display: grid;
   gap: 0.6rem;
@@ -1525,6 +1788,19 @@ a {
 
   .search-box {
     width: 100%;
+  }
+
+  .board-query-controls {
+    width: 100%;
+  }
+
+  .board-query-controls .search-box {
+    min-width: 0;
+  }
+
+  .board-filter-menu {
+    right: 0;
+    left: auto;
   }
 
   .board-scroll {

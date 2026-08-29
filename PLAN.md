@@ -14,10 +14,11 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 ## Product and Interface
 
 - Organize content as a global list of boards -> columns -> cards. Workspaces are not part of the product or navigation; the legacy workspace table remains only as an internal migration detail for existing databases.
-- Use the left sidebar exclusively as the global board switcher. Unlocked editors can create boards there, and board URLs use stable board IDs rather than workspace-qualified paths.
+- Use the left sidebar exclusively as the global board switcher. Unlocked editors can create boards there. Canonical board URLs use the globally unique human-readable form `/b/{slug}` without exposing the internal board ID; legacy ID-based links redirect to the canonical route. Editors can change the slug in Misc. settings only after explicit confirmation that old slug links will stop working. Enforce case-insensitively unique board names when boards are created, renamed, or imported.
 - Support column reordering and card reordering or movement between columns on the same board.
   - Provide pointer and keyboard drag-and-drop from the entire card surface; a click still opens card details.
   - Keep post-drop feedback stable; do not animate cards back toward their previous positions.
+- Allow unlocked editors to create columns from a trailing add-column tile, rename them inline, and archive them. Empty columns archive immediately; columns containing cards require confirmation that those cards leave the active board with the column and can be restored together from Archive.
 - Cards support:
   - Title and GFM Markdown description.
   - Multiple board-scoped text tags with editable names and colors. The Tags settings category offers useful presets, a full color picker, and deletion; edits save automatically without per-tag save buttons. Cards use removable tag badges and a searchable assignment picker.
@@ -27,7 +28,7 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 - Put a compact add button beside each column's card count so an unlocked editor can create a card directly in that column.
 - Title and description use an inline editing mode with explicit Save/Cancel so the card drawer retains its layout. Moves, tags, assignees, and comments persist immediately.
 - Open card details in a right-side drawer by default. Provide a control to switch between drawer and centered-modal presentation and remember that preference in the browser. Card URLs remain directly linkable in either presentation.
-- Show the board title once in the top breadcrumb bar, with a left-aligned board search toolbar below it. Search only the current board's card titles and descriptions. Filters cover tags, assignees, and unassigned cards. Combine categories with AND and selections within a category with OR.
+- Show the board title once in the top breadcrumb bar, with a left-aligned board search toolbar below it. Search only the current board's card titles and descriptions. Adjacent multi-select filters cover tags and assigned people, work simultaneously with search, combine categories with AND, and combine selections within a category with OR.
 - Move boards, columns, and cards to a recoverable archive with restore controls and individually confirmed permanent deletion. Retain archived items indefinitely until an unlocked editor restores or explicitly permanently deletes them.
 - Create a resettable Sample Board on a new database. It demonstrates columns, Markdown, editable tags, comments, filtering, the archive, and drag-and-drop without adding fake participants.
 - Match Graphite's compact monochrome design family, including local fonts/icons, light and dark themes, clear focus states, and no remote assets. A top-aligned categorized settings modal opens to Appearance, where one theme toggle lives; Tags contains board tag management, Persons contains instance-wide assignment-person management, and the final Misc. category contains import, export, and archive access.
@@ -77,7 +78,6 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 - Add slim `README.md` and `CONTRIBUTING.md`, The Unlicense, `AGENTS.md`, `.gitignore`, `.dockerignore`, `.gitattributes`, Biome/TypeScript/Vitest/Playwright configuration, and `.env.example` without secrets.
 - Keep `AGENTS_LOCAL.md` ignored for machine-specific paths, ports, and launch notes. Never commit secrets or personal machine configuration.
 - Finalize repository text files with CRLF while allowing runtime-generated Unix scripts and container entrypoints to use LF where required.
-- Configure the repo-local identity as `Lucas <59397873+EleventhLucas@users.noreply.github.com>`.
 - Do not add GitHub Actions.
 - Provide scripts for `dev`, `dev:server`, `dev:web`, `start`, `build`, `package:docker`, `test`, `test:integration`, `test:e2e`, `test:smoke`, `typecheck`, `lint`, `format`, and `format:check`.
 - Add VS Code launches for the complete app, server-only development, Web UI development, browser debugging, and targeted tests. Do not add `.vscode/tasks.json`.

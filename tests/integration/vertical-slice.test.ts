@@ -362,6 +362,25 @@ describe("Shale vertical slice", () => {
         .some((card) => card.id === "card-welcome"),
     ).toBe(true);
 
+    const reservedImportName = await app.request("/_shale/boards", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ name: "Reserved Imported Name" }),
+    });
+    expect(reservedImportName.status).toBe(201);
+    const duplicateNameImport = await app.request("/_shale/board-files/sandbox-board", {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({
+        ...exported,
+        board: { ...exported.board, name: "reserved imported name" },
+      }),
+    });
+    expect(duplicateNameImport.status).toBe(409);
+    expect(await duplicateNameImport.json()).toMatchObject({
+      error: "A board with that imported name already exists.",
+    });
+
     const importedFile = {
       ...exported,
       board: {
@@ -431,8 +450,9 @@ describe("Shale vertical slice", () => {
       publicOrigin: origin,
       sessionDays: 30,
     });
-    const globalSample = await app.request("/_shale/board/sandbox-board");
+    const globalSample = await app.request("/_shale/board/sample-board");
     expect(globalSample.status).toBe(200);
+    expect((await app.request("/_shale/board/sandbox-board")).status).toBe(200);
 
     const createdResponse = await app.request("/_shale/boards", {
       method: "POST",
@@ -440,8 +460,29 @@ describe("Shale vertical slice", () => {
       body: JSON.stringify({ name: "Second Board" }),
     });
     expect(createdResponse.status).toBe(201);
-    const created = (await createdResponse.json()) as { id: string; revision: number };
+    const created = (await createdResponse.json()) as {
+      id: string;
+      slug: string;
+      revision: number;
+    };
     expect(created.revision).toBe(1);
+
+    const globallyDuplicateCreate = await app.request("/_shale/boards", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ name: "sample board" }),
+    });
+    expect(globallyDuplicateCreate.status).toBe(409);
+
+    const duplicateCreate = await app.request("/_shale/boards", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ name: "  SECOND BOARD  " }),
+    });
+    expect(duplicateCreate.status).toBe(409);
+    expect(await duplicateCreate.json()).toMatchObject({
+      error: "A board with that name already exists.",
+    });
 
     const renamedResponse = await app.request(`/_shale/boards/${created.id}`, {
       method: "PATCH",
@@ -451,16 +492,93 @@ describe("Shale vertical slice", () => {
     expect(renamedResponse.status).toBe(200);
     expect(await renamedResponse.json()).toMatchObject({ name: "Renamed Board", revision: 2 });
 
+    const globallyDuplicateUrl = await app.request(`/_shale/boards/${created.id}/slug`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ slug: "sample-board", revision: 2 }),
+    });
+    expect(globallyDuplicateUrl.status).toBe(409);
+
+    const changedUrl = await app.request(`/_shale/boards/${created.id}/slug`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ slug: "delivery-board", revision: 2 }),
+    });
+    expect(changedUrl.status).toBe(200);
+    expect(await changedUrl.json()).toMatchObject({ slug: "delivery-board", revision: 3 });
+
+    const reservedUrl = await app.request("/_shale/boards", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ name: "Reserved URL" }),
+    });
+    expect(reservedUrl.status).toBe(201);
+    const duplicateRename = await app.request(`/_shale/boards/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ name: "reserved url", revision: 3 }),
+    });
+    expect(duplicateRename.status).toBe(409);
+    expect(await duplicateRename.json()).toMatchObject({
+      error: "A board with that name already exists.",
+    });
+    const duplicateUrl = await app.request(`/_shale/boards/${created.id}/slug`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ slug: "reserved-url", revision: 3 }),
+    });
+    expect(duplicateUrl.status).toBe(409);
+    expect(await duplicateUrl.json()).toMatchObject({ error: "That board URL is already in use." });
+
     const createdBoard = (await (await app.request(`/_shale/board/${created.id}`)).json()) as {
-      board: { name: string };
-      columns: Array<{ id: string; title: string; cards: unknown[] }>;
+      board: { name: string; slug: string; revision: number };
+      columns: Array<{ id: string; title: string; position: number; cards: unknown[] }>;
     };
     expect(createdBoard.board.name).toBe("Renamed Board");
+    expect(createdBoard.board).toMatchObject({ slug: "delivery-board", revision: 3 });
     expect(createdBoard.columns.map((column) => column.title)).toEqual([
       "Backlog",
       "In progress",
       "Done",
     ]);
+    const boardByChangedSlug = await app.request("/_shale/board/delivery-board");
+    expect(boardByChangedSlug.status).toBe(200);
+    expect(await boardByChangedSlug.json()).toMatchObject({ board: { id: created.id } });
+
+    const addedColumnResponse = await app.request(`/_shale/boards/${created.id}/columns`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ title: "Verify" }),
+    });
+    expect(addedColumnResponse.status).toBe(201);
+    const addedColumn = (await addedColumnResponse.json()) as {
+      id: string;
+      title: string;
+      position: number;
+      revision: number;
+    };
+    expect(addedColumn).toMatchObject({ title: "Verify", position: 3, revision: 1 });
+
+    const renamedColumnResponse = await app.request(`/_shale/columns/${addedColumn.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ title: "Ready to ship", revision: addedColumn.revision }),
+    });
+    expect(renamedColumnResponse.status).toBe(200);
+    expect(await renamedColumnResponse.json()).toMatchObject({
+      title: "Ready to ship",
+      revision: 2,
+    });
+
+    const removedEmptyColumn = await app.request(`/_shale/trash/column/${addedColumn.id}`, {
+      method: "POST",
+      headers: { origin },
+    });
+    expect(removedEmptyColumn.status).toBe(200);
+    const afterColumnRemoval = (await (
+      await app.request(`/_shale/board/${created.id}`)
+    ).json()) as { columns: Array<{ id: string }> };
+    expect(afterColumnRemoval.columns.some((column) => column.id === addedColumn.id)).toBe(false);
 
     const cardResponse = await app.request(`/_shale/columns/${createdBoard.columns[0].id}/cards`, {
       method: "POST",
@@ -559,6 +677,14 @@ describe("Shale vertical slice", () => {
         })
       ).status,
     ).toBe(200);
+    const boardAfterColumnRestore = (await (
+      await app.request("/_shale/boards/sample-workspace/sample-board")
+    ).json()) as { columns: Array<{ id: string; cards: Array<{ id: string }> }> };
+    expect(
+      boardAfterColumnRestore.columns
+        .find((column) => column.id === "sandbox-progress")
+        ?.cards.some((card) => card.id === "card-live"),
+    ).toBe(true);
 
     expect(
       (

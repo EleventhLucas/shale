@@ -1,6 +1,12 @@
 import { z } from "zod";
 
 export const idSchema = z.string().min(1).max(100);
+export const boardSlugSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase letters, numbers, and single hyphens.");
 
 export const hexColorSchema = z
   .string()
@@ -54,7 +60,7 @@ export const columnSchema = z.object({
 export const boardSummarySchema = z.object({
   id: idSchema,
   name: z.string(),
-  slug: z.string(),
+  slug: boardSlugSchema,
   workspaceId: idSchema,
   revision: z.number().int().positive(),
 });
@@ -99,6 +105,20 @@ export const createBoardInputSchema = z.object({
 
 export const updateBoardInputSchema = z.object({
   name: z.string().trim().min(1).max(200),
+  revision: z.number().int().positive(),
+});
+
+export const updateBoardSlugInputSchema = z.object({
+  slug: boardSlugSchema,
+  revision: z.number().int().positive(),
+});
+
+export const createColumnInputSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+});
+
+export const updateColumnInputSchema = z.object({
+  title: z.string().trim().min(1).max(200),
   revision: z.number().int().positive(),
 });
 

@@ -1,17 +1,3 @@
-# Shale
+<p align="center"><img src="shale.png" alt="Shale icon" width="128"></p>
 
-Shale is a small self-hosted kanban board for trusted groups. Anyone with the URL can read. Editing
-requires the host's shared password when configured; otherwise the instance is publicly editable.
-
-## Development
-
-Requires Bun 1.3.14.
-
-```sh
-cp .env.example .env.local
-bun install --frozen-lockfile
-bun run dev
-```
-
-Do not expose Shale directly to the internet without HTTPS through a reverse proxy. An unlisted
-URL is not privacy protection.
+<h1 align="center">Shale</h1><p align="center">A small self-hosted kanban board for trusted groups.</p>

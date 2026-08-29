@@ -23,6 +23,7 @@ import {
   ChevronLeft,
   CircleUserRound,
   Download,
+  Filter,
   ImagePlus,
   LockKeyhole,
   Menu,
@@ -42,6 +43,7 @@ import ReactMarkdown from "react-markdown";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
+import shaleIcon from "../../shale_vector.svg";
 import type {
   BoardExport,
   BoardSnapshot,
@@ -54,6 +56,7 @@ import type {
 } from "../shared/contracts";
 import { boardExportSchema, defaultTagColor } from "../shared/contracts";
 import { ApiError, api } from "./api";
+import { cardMatchesBoardFilters } from "./board-filters";
 import { Button } from "./components/button";
 
 const participantStorageKey = "shale.participant";
@@ -249,14 +252,14 @@ export function App() {
             ) : bootstrap.isError ? (
               <EmptyState message="Shale's server is unavailable. Check the server launch output." />
             ) : boards[0] ? (
-              <Navigate replace to={`/b/${encodeURIComponent(boards[0].id)}`} />
+              <Navigate replace to={`/b/${encodeURIComponent(boards[0].slug)}`} />
             ) : (
               <EmptyState />
             )
           }
         />
         <Route
-          path="/b/:boardId"
+          path="/b/:boardSlug"
           element={
             <BoardPage
               participant={activeParticipant}
@@ -269,7 +272,33 @@ export function App() {
           }
         />
         <Route
-          path="/b/:boardId/c/:cardId"
+          path="/b/:legacyBoardId/:legacyBoardSlug"
+          element={
+            <BoardPage
+              participant={activeParticipant}
+              requestEditing={requestEditing}
+              theme={theme}
+              setTheme={setTheme}
+              openUnlock={() => setUnlockOpen(true)}
+              openIdentity={() => setIdentityOpen(true)}
+            />
+          }
+        />
+        <Route
+          path="/b/:boardSlug/c/:cardId"
+          element={
+            <BoardPage
+              participant={activeParticipant}
+              requestEditing={requestEditing}
+              theme={theme}
+              setTheme={setTheme}
+              openUnlock={() => setUnlockOpen(true)}
+              openIdentity={() => setIdentityOpen(true)}
+            />
+          }
+        />
+        <Route
+          path="/b/:legacyBoardId/:legacyBoardSlug/c/:cardId"
           element={
             <BoardPage
               participant={activeParticipant}
@@ -319,7 +348,8 @@ function BoardPage({
   openUnlock: () => void;
   openIdentity: () => void;
 }) {
-  const { boardId = "", cardId } = useParams();
+  const { boardSlug = "", legacyBoardId, cardId } = useParams();
+  const boardReference = legacyBoardId ?? boardSlug;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [navOpen, setNavOpen] = useState(true);
@@ -328,11 +358,22 @@ function BoardPage({
   const [trashOpen, setTrashOpen] = useState(false);
   const [createBoardOpen, setCreateBoardOpen] = useState(false);
   const [createCardColumn, setCreateCardColumn] = useState<Column>();
+  const [createColumnOpen, setCreateColumnOpen] = useState(false);
+  const [deleteColumn, setDeleteColumn] = useState<Column>();
+  const [slugChangeOpen, setSlugChangeOpen] = useState(false);
+  const [tagFilters, setTagFilters] = useState<string[]>([]);
+  const [personFilters, setPersonFilters] = useState<string[]>([]);
   const [pendingImport, setPendingImport] = useState<{ fileName: string; data: BoardExport }>();
   const [boardFileError, setBoardFileError] = useState<string>();
   const importInput = useRef<HTMLInputElement>(null);
   const [activeCardId, setActiveCardId] = useState<string>();
   const [moveError, setMoveError] = useState<string>();
+  useEffect(() => {
+    if (!boardReference) return;
+    setSearch("");
+    setTagFilters([]);
+    setPersonFilters([]);
+  }, [boardReference]);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -340,14 +381,22 @@ function BoardPage({
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
   const bootstrap = useQuery({ queryKey: ["bootstrap"], queryFn: api.bootstrap });
   const board = useQuery({
-    queryKey: ["board", boardId],
-    queryFn: () => api.board(boardId),
+    queryKey: ["board", boardReference],
+    queryFn: () => api.board(boardReference),
   });
   const lock = useMutation({
     mutationFn: api.lock,
     onSuccess: (data) => queryClient.setQueryData(["session"], data),
   });
-  const boardKey = ["board", boardId] as const;
+  const boardKey = ["board", boardReference];
+  const canonicalBoardPath = board.data
+    ? `/b/${encodeURIComponent(board.data.board.slug)}`
+    : `/b/${encodeURIComponent(boardReference)}`;
+  useEffect(() => {
+    if (!board.data || (!legacyBoardId && boardSlug === board.data.board.slug)) return;
+    const suffix = cardId ? `/c/${encodeURIComponent(cardId)}` : "";
+    navigate(`${canonicalBoardPath}${suffix}`, { replace: true });
+  }, [board.data, boardSlug, legacyBoardId, canonicalBoardPath, cardId, navigate]);
   const exportFile = useMutation({
     mutationFn: () => api.exportBoard(board.data?.board.id ?? ""),
     onSuccess: (data) => {
@@ -374,7 +423,7 @@ function BoardPage({
     onSuccess: async () => {
       setPendingImport(undefined);
       setBoardFileError(undefined);
-      navigate(`/b/${encodeURIComponent(boardId)}`);
+      navigate(canonicalBoardPath);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: boardKey }),
         queryClient.invalidateQueries({ queryKey: ["bootstrap"] }),
@@ -411,6 +460,18 @@ function BoardPage({
       setMoveError(error.message);
     },
     onSettled: () => void queryClient.invalidateQueries({ queryKey: boardKey }),
+  });
+  const removeColumn = useMutation({
+    mutationFn: (column: Column) => api.moveToTrash("column", column.id),
+    onMutate: () => setMoveError(undefined),
+    onError: (error) => setMoveError(error.message),
+    onSuccess: async () => {
+      setDeleteColumn(undefined);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: boardKey }),
+        queryClient.invalidateQueries({ queryKey: ["trash"] }),
+      ]);
+    },
   });
 
   const selectedCard = board.data?.columns
@@ -486,7 +547,7 @@ function BoardPage({
     <div className={`app-shell ${navOpen ? "app-shell--nav" : ""}`}>
       <aside className="sidebar" aria-label="Board navigation">
         <div className="brand-row">
-          <img className="brand-mark" src="/shale-mark.svg" alt="" />
+          <img className="brand-mark" src={shaleIcon} alt="" />
           <span>SHALE</span>
         </div>
         <div className="board-nav-heading">
@@ -505,8 +566,10 @@ function BoardPage({
         <nav className="board-list">
           {boards.map((item) => (
             <a
-              className={item.id === boardId ? "board-link board-link--active" : "board-link"}
-              href={`/b/${encodeURIComponent(item.id)}`}
+              className={
+                item.id === board.data.board.id ? "board-link board-link--active" : "board-link"
+              }
+              href={`/b/${encodeURIComponent(item.slug)}`}
               key={item.id}
             >
               <span className="board-dot" />
@@ -576,16 +639,26 @@ function BoardPage({
         </header>
 
         <section className="board-toolbar">
-          <label className="search-box">
-            <Search size={16} />
-            <span className="sr-only">Search cards</span>
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search this board"
+          <div className="board-query-controls">
+            <label className="search-box">
+              <Search size={16} />
+              <span className="sr-only">Search cards</span>
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search this board"
+              />
+              <kbd>/</kbd>
+            </label>
+            <BoardFilters
+              tags={board.data.tags}
+              people={people}
+              tagIds={tagFilters}
+              personIds={personFilters}
+              onTagIdsChange={setTagFilters}
+              onPersonIdsChange={setPersonFilters}
             />
-            <kbd>/</kbd>
-          </label>
+          </div>
         </section>
 
         {moveError && (
@@ -607,14 +680,34 @@ function BoardPage({
                 column={column}
                 people={people}
                 query={query}
+                tagFilters={tagFilters}
+                personFilters={personFilters}
+                boardKey={boardKey}
+                canEdit={Boolean(session.data?.unlocked)}
+                requestEditing={requestEditing}
                 onOpen={(card) =>
-                  navigate(`/b/${encodeURIComponent(boardId)}/c/${encodeURIComponent(card.id)}`)
+                  navigate(`${canonicalBoardPath}/c/${encodeURIComponent(card.id)}`)
                 }
                 onCreate={() => {
                   if (requestEditing()) setCreateCardColumn(column);
                 }}
+                onDelete={() => {
+                  if (!requestEditing()) return;
+                  if (column.cards.length > 0) setDeleteColumn(column);
+                  else removeColumn.mutate(column);
+                }}
               />
             ))}
+            <button
+              className="column column--add"
+              type="button"
+              onClick={() => {
+                if (requestEditing()) setCreateColumnOpen(true);
+              }}
+            >
+              <Plus size={19} />
+              <span>Add column</span>
+            </button>
           </section>
           <DragOverlay dropAnimation={null}>
             {activeCard ? <CardPreview card={activeCard} people={people} /> : null}
@@ -626,14 +719,14 @@ function BoardPage({
         <CardDrawer
           key={cardId}
           card={selectedCard}
-          boardKey={["board", boardId]}
+          boardKey={boardKey}
           tags={board.data.tags}
           people={people}
           participant={participant}
           requestEditing={requestEditing}
           openIdentity={openIdentity}
-          onClose={() => navigate(`/b/${encodeURIComponent(boardId)}`)}
-          onTrashed={() => navigate(`/b/${encodeURIComponent(boardId)}`)}
+          onClose={() => navigate(canonicalBoardPath)}
+          onTrashed={() => navigate(canonicalBoardPath)}
         />
       )}
       {settingsOpen && (
@@ -641,7 +734,7 @@ function BoardPage({
           board={board.data.board}
           tags={board.data.tags}
           boardId={board.data.board.id}
-          boardKey={["board", boardId]}
+          boardKey={boardKey}
           people={people}
           requestEditing={requestEditing}
           theme={theme}
@@ -657,29 +750,60 @@ function BoardPage({
             setSettingsOpen(false);
             setTrashOpen(true);
           }}
+          onChangeSlug={() => {
+            setSettingsOpen(false);
+            setSlugChangeOpen(true);
+          }}
           onClose={() => setSettingsOpen(false)}
         />
       )}
-      {trashOpen && (
-        <TrashDialog boardKey={["board", boardId]} onClose={() => setTrashOpen(false)} />
-      )}
+      {trashOpen && <TrashDialog boardKey={boardKey} onClose={() => setTrashOpen(false)} />}
       {createBoardOpen && (
         <CreateBoardDialog
           onClose={() => setCreateBoardOpen(false)}
-          onCreated={(createdBoardId) => {
+          onCreated={(createdBoard) => {
             setCreateBoardOpen(false);
-            navigate(`/b/${encodeURIComponent(createdBoardId)}`);
+            navigate(`/b/${encodeURIComponent(createdBoard.slug)}`);
           }}
         />
       )}
       {createCardColumn && (
         <CreateCardDialog
           column={createCardColumn}
-          boardKey={["board", boardId]}
+          boardKey={boardKey}
           onClose={() => setCreateCardColumn(undefined)}
           onCreated={(card) => {
             setCreateCardColumn(undefined);
-            navigate(`/b/${encodeURIComponent(boardId)}/c/${encodeURIComponent(card.id)}`);
+            navigate(`${canonicalBoardPath}/c/${encodeURIComponent(card.id)}`);
+          }}
+        />
+      )}
+      {createColumnOpen && (
+        <CreateColumnDialog
+          boardId={board.data.board.id}
+          boardKey={boardKey}
+          onClose={() => setCreateColumnOpen(false)}
+        />
+      )}
+      {deleteColumn && (
+        <DeleteColumnDialog
+          column={deleteColumn}
+          isPending={removeColumn.isPending}
+          error={removeColumn.error?.message}
+          onClose={() => {
+            if (!removeColumn.isPending) setDeleteColumn(undefined);
+          }}
+          onConfirm={() => removeColumn.mutate(deleteColumn)}
+        />
+      )}
+      {slugChangeOpen && (
+        <ChangeBoardSlugDialog
+          board={board.data.board}
+          boardKey={boardKey}
+          onClose={() => setSlugChangeOpen(false)}
+          onChanged={(slug) => {
+            setSlugChangeOpen(false);
+            navigate(`/b/${encodeURIComponent(slug)}`);
           }}
         />
       )}
@@ -740,38 +864,182 @@ function moveCardInSnapshot(
   };
 }
 
+function BoardFilters({
+  tags,
+  people,
+  tagIds,
+  personIds,
+  onTagIdsChange,
+  onPersonIdsChange,
+}: {
+  tags: Tag[];
+  people: Participant[];
+  tagIds: string[];
+  personIds: string[];
+  onTagIdsChange: (ids: string[]) => void;
+  onPersonIdsChange: (ids: string[]) => void;
+}) {
+  const activeCount = tagIds.length + personIds.length;
+  const toggle = (ids: string[], id: string) =>
+    ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id];
+  return (
+    <details className="board-filter">
+      <summary
+        className={
+          activeCount ? "board-filter-toggle board-filter-toggle--active" : "board-filter-toggle"
+        }
+      >
+        <Filter size={15} /> Filters
+        {activeCount > 0 && <span>{activeCount}</span>}
+      </summary>
+      <div className="board-filter-menu">
+        <div className="board-filter-heading">
+          <strong>Filters</strong>
+          {activeCount > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                onTagIdsChange([]);
+                onPersonIdsChange([]);
+              }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <fieldset>
+          <legend>Tags</legend>
+          {tags.map((tag) => (
+            <label key={tag.id}>
+              <input
+                type="checkbox"
+                checked={tagIds.includes(tag.id)}
+                onChange={() => onTagIdsChange(toggle(tagIds, tag.id))}
+              />
+              <i className="tag-color-dot" style={tagColorStyle(tag.color)} aria-hidden="true" />
+              {tag.name}
+            </label>
+          ))}
+          {tags.length === 0 && <span className="board-filter-empty">No tags</span>}
+        </fieldset>
+        <fieldset>
+          <legend>People</legend>
+          {people.map((person) => (
+            <label key={person.id}>
+              <input
+                type="checkbox"
+                checked={personIds.includes(person.id)}
+                onChange={() => onPersonIdsChange(toggle(personIds, person.id))}
+              />
+              <PersonAvatar person={person} />
+              {person.displayName}
+            </label>
+          ))}
+          {people.length === 0 && <span className="board-filter-empty">No people</span>}
+        </fieldset>
+      </div>
+    </details>
+  );
+}
+
+function ColumnTitleInput({
+  column,
+  boardKey,
+  canEdit,
+  requestEditing,
+}: {
+  column: Column;
+  boardKey: string[];
+  canEdit: boolean;
+  requestEditing: () => boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [title, setTitle] = useState(column.title);
+  const previousColumn = useRef(column);
+  const update = useMutation({
+    mutationFn: ({ nextTitle, revision }: { nextTitle: string; revision: number }) =>
+      api.updateColumn(column.id, { title: nextTitle, revision }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: boardKey }),
+  });
+  useEffect(() => {
+    const previous = previousColumn.current;
+    setTitle((current) => (current.trim() === previous.title ? column.title : current));
+    previousColumn.current = column;
+  }, [column]);
+  const persist = useCallback(() => {
+    const nextTitle = title.trim();
+    if (!canEdit || !nextTitle || nextTitle === column.title || update.isPending) return;
+    update.mutate({ nextTitle, revision: column.revision });
+  }, [canEdit, column, title, update]);
+  useEffect(() => {
+    const timeout = window.setTimeout(persist, 400);
+    return () => window.clearTimeout(timeout);
+  }, [persist]);
+  return (
+    <input
+      className="column-title-input"
+      value={title}
+      maxLength={200}
+      aria-label={`Rename ${column.title} column`}
+      readOnly={!canEdit}
+      onFocus={() => {
+        if (!canEdit) requestEditing();
+      }}
+      onBlur={persist}
+      onChange={(event) => setTitle(event.target.value)}
+    />
+  );
+}
+
 function BoardColumn({
   column,
   people,
   query,
+  tagFilters,
+  personFilters,
+  boardKey,
+  canEdit,
+  requestEditing,
   onOpen,
   onCreate,
+  onDelete,
 }: {
   column: Column;
   people: Participant[];
   query: string;
+  tagFilters: string[];
+  personFilters: string[];
+  boardKey: string[];
+  canEdit: boolean;
+  requestEditing: () => boolean;
   onOpen: (card: Card) => void;
   onCreate: () => void;
+  onDelete: () => void;
 }) {
   const { isOver, setNodeRef } = useDroppable({
     id: column.id,
     data: { type: "column", columnId: column.id },
   });
-  const cards = column.cards.filter(
-    (card) =>
-      !query ||
-      card.title.toLocaleLowerCase().includes(query) ||
-      card.description.toLocaleLowerCase().includes(query),
+  const cards = column.cards.filter((card) =>
+    cardMatchesBoardFilters(card, query, tagFilters, personFilters),
   );
 
   return (
     <div className={`column ${isOver ? "column--over" : ""}`} ref={setNodeRef}>
       <div className="column-heading">
-        <h2>{column.title}</h2>
+        <ColumnTitleInput
+          column={column}
+          boardKey={boardKey}
+          canEdit={canEdit}
+          requestEditing={requestEditing}
+        />
         <div className="column-heading-actions">
           <span>{cards.length}</span>
           <button type="button" aria-label={`Add card to ${column.title}`} onClick={onCreate}>
             <Plus size={14} />
+          </button>
+          <button type="button" aria-label={`Delete ${column.title}`} onClick={onDelete}>
+            <Trash2 size={13} />
           </button>
         </div>
       </div>
@@ -1571,7 +1839,7 @@ function CreateBoardDialog({
   onCreated,
 }: {
   onClose: () => void;
-  onCreated: (boardId: string) => void;
+  onCreated: (board: BoardSnapshot["board"]) => void;
 }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
@@ -1579,7 +1847,7 @@ function CreateBoardDialog({
     mutationFn: () => api.createBoard(name.trim()),
     onSuccess: async (board) => {
       await queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
-      onCreated(board.id);
+      onCreated(board);
     },
   });
   return (
@@ -1668,6 +1936,160 @@ function CreateCardDialog({
   );
 }
 
+function CreateColumnDialog({
+  boardId,
+  boardKey,
+  onClose,
+}: {
+  boardId: string;
+  boardKey: string[];
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [title, setTitle] = useState("");
+  const create = useMutation({
+    mutationFn: () => api.createColumn(boardId, title.trim()),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: boardKey });
+      onClose();
+    },
+  });
+  return (
+    <Dialog title="Add column" onClose={onClose}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          create.mutate();
+        }}
+      >
+        <label className="field-label" htmlFor="new-column-title">
+          Column name
+        </label>
+        <input
+          className="text-input"
+          id="new-column-title"
+          value={title}
+          maxLength={200}
+          autoFocus
+          onChange={(event) => setTitle(event.target.value)}
+        />
+        {create.error && <p className="form-error">{create.error.message}</p>}
+        <div className="dialog-actions">
+          <Button type="button" variant="quiet" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={!title.trim() || create.isPending}>
+            <Plus size={15} /> {create.isPending ? "Adding…" : "Add column"}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function DeleteColumnDialog({
+  column,
+  isPending,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  column: Column;
+  isPending: boolean;
+  error?: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog title={`Delete ${column.title}?`} onClose={onClose}>
+      <div className="import-warning">
+        <strong>This column contains {column.cards.length} cards.</strong>
+        <p>
+          Deleting the column removes all of those cards from the board. The column and its cards
+          can be restored together from Archive.
+        </p>
+      </div>
+      {error && <p className="form-error">{error}</p>}
+      <div className="dialog-actions">
+        <Button type="button" variant="quiet" disabled={isPending} onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="button" variant="danger" disabled={isPending} onClick={onConfirm}>
+          <Trash2 size={15} /> {isPending ? "Deleting…" : "Delete column and cards"}
+        </Button>
+      </div>
+    </Dialog>
+  );
+}
+
+function ChangeBoardSlugDialog({
+  board,
+  boardKey,
+  onClose,
+  onChanged,
+}: {
+  board: BoardSnapshot["board"];
+  boardKey: string[];
+  onClose: () => void;
+  onChanged: (slug: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [slug, setSlug] = useState(board.slug);
+  const valid = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) && slug.length <= 80;
+  const update = useMutation({
+    mutationFn: () => api.updateBoardSlug(board.id, { slug, revision: board.revision }),
+    onSuccess: async (updated) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: boardKey }),
+        queryClient.invalidateQueries({ queryKey: ["bootstrap"] }),
+      ]);
+      onChanged(updated.slug);
+    },
+  });
+  return (
+    <Dialog title="Change board URL?" onClose={onClose}>
+      <p className="dialog-copy">
+        This changes the board's address. Links using the old slug will stop working.
+      </p>
+      <label className="field-label" htmlFor="board-url-slug">
+        URL slug
+      </label>
+      <div className="slug-input-row">
+        <span>/b/</span>
+        <input
+          className="text-input"
+          id="board-url-slug"
+          value={slug}
+          maxLength={80}
+          autoFocus
+          spellCheck={false}
+          onChange={(event) => setSlug(event.target.value.toLocaleLowerCase())}
+        />
+      </div>
+      {!valid && slug.length > 0 && (
+        <p className="form-error">Use lowercase letters, numbers, and single hyphens.</p>
+      )}
+      <div className="import-warning">
+        <strong>Confirm this URL change.</strong>
+        <p>Bookmarks and copied links will use the new slug after this change.</p>
+      </div>
+      {update.error && <p className="form-error">{update.error.message}</p>}
+      <div className="dialog-actions">
+        <Button type="button" variant="quiet" disabled={update.isPending} onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          disabled={!valid || slug === board.slug || update.isPending}
+          onClick={() => update.mutate()}
+        >
+          {update.isPending ? "Changing…" : "Confirm URL change"}
+        </Button>
+      </div>
+    </Dialog>
+  );
+}
+
 function BoardNameField({
   board,
   boardKey,
@@ -1709,9 +2131,11 @@ function BoardNameField({
         className="text-input"
         value={name}
         maxLength={200}
+        aria-invalid={Boolean(update.error)}
         onBlur={persist}
         onChange={(event) => setName(event.target.value)}
       />
+      {update.error && <span className="form-error">{update.error.message}</span>}
     </label>
   );
 }
@@ -1730,6 +2154,7 @@ function SettingsDialog({
   onImport,
   onExport,
   onOpenArchive,
+  onChangeSlug,
   onClose,
 }: {
   board: BoardSnapshot["board"];
@@ -1745,6 +2170,7 @@ function SettingsDialog({
   onImport: () => void;
   onExport: () => void;
   onOpenArchive: () => void;
+  onChangeSlug: () => void;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -1929,6 +2355,15 @@ function SettingsDialog({
         >
           <p className="dialog-copy">Transfer this board or open the recoverable archive.</p>
           <BoardNameField board={board} boardKey={boardKey} />
+          <div className="misc-url-row">
+            <div>
+              <span>Board URL</span>
+              <code>/b/{board.slug}</code>
+            </div>
+            <Button type="button" size="small" variant="quiet" onClick={onChangeSlug}>
+              Change URL
+            </Button>
+          </div>
           <div className="misc-actions">
             <Button type="button" variant="quiet" onClick={onImport}>
               <Upload size={16} /> Import board
@@ -2224,7 +2659,7 @@ function Dialog({
 function LoadingScreen() {
   return (
     <div className="loading-screen">
-      <img src="/shale-mark.svg" alt="" />
+      <img src={shaleIcon} alt="" />
       <span>Loading Shale…</span>
     </div>
   );

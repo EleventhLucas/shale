@@ -7,6 +7,7 @@ import type {
   BoardSnapshot,
   Bootstrap,
   Card,
+  Column,
   Participant,
   Tag,
   TagColor,
@@ -60,6 +61,7 @@ export function openDatabase(dataDir: string): Database {
   db.exec("PRAGMA busy_timeout = 5000;");
   runMigrations(db);
   seedSandbox(db);
+  ensureGlobalBoardSlugs(db);
   return db;
 }
 
@@ -69,6 +71,7 @@ export function openTestDatabase(): Database {
   db.exec("PRAGMA busy_timeout = 5000;");
   runMigrations(db);
   seedSandbox(db);
+  ensureGlobalBoardSlugs(db);
   return db;
 }
 
@@ -449,6 +452,21 @@ export function getBoardById(db: Database, boardId: string): BoardSnapshot | nul
   return row ? boardSnapshotFromRow(db, row) : null;
 }
 
+export function getBoardBySlug(db: Database, boardSlug: string): BoardSnapshot | null {
+  const row = db
+    .query(
+      `SELECT boards.id AS board_id, boards.name AS board_name, boards.slug AS board_slug,
+        boards.revision AS board_revision, workspaces.id AS workspace_id,
+        workspaces.name AS workspace_name, workspaces.slug AS workspace_slug,
+        workspaces.is_sandbox
+      FROM boards JOIN workspaces ON workspaces.id = boards.workspace_id
+      WHERE boards.slug = ? COLLATE NOCASE
+        AND workspaces.trashed_at IS NULL AND boards.trashed_at IS NULL`,
+    )
+    .get(boardSlug) as Row | null;
+  return row ? boardSnapshotFromRow(db, row) : null;
+}
+
 export function getCard(db: Database, cardId: string): Card | null {
   const row = db
     .query(
@@ -469,8 +487,58 @@ function boardSlug(value: string): string {
   );
 }
 
-export function createBoard(db: Database, boardId: string, name: string): BoardSnapshot["board"] {
-  return db.transaction(() => {
+function normalizedBoardName(value: string): string {
+  return value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
+}
+
+function boardNameExists(db: Database, name: string, excludingId?: string): boolean {
+  const normalized = normalizedBoardName(name);
+  return asRows(db.query("SELECT id, name FROM boards").all()).some(
+    (board) =>
+      String(board.id) !== excludingId && normalizedBoardName(String(board.name)) === normalized,
+  );
+}
+
+function boardSlugExists(db: Database, slug: string, excludingId?: string): boolean {
+  return Boolean(
+    db
+      .query("SELECT 1 FROM boards WHERE slug = ? COLLATE NOCASE AND id <> ?")
+      .get(slug, excludingId ?? ""),
+  );
+}
+
+function ensureGlobalBoardSlugs(db: Database): void {
+  db.transaction(() => {
+    const used = new Set<string>();
+    const boards = asRows(db.query("SELECT id, slug FROM boards ORDER BY created_at, id").all());
+    const update = db.query(
+      "UPDATE boards SET slug = ?, revision = revision + 1, updated_at = ? WHERE id = ?",
+    );
+    const timestamp = now();
+    for (const board of boards) {
+      const original = String(board.slug);
+      let slug = original;
+      let suffix = 2;
+      while (used.has(slug.toLocaleLowerCase("en-US"))) {
+        slug = `${original}-${suffix}`;
+        suffix += 1;
+      }
+      used.add(slug.toLocaleLowerCase("en-US"));
+      if (slug !== original) update.run(slug, timestamp, board.id);
+    }
+  })();
+}
+
+export type CreateBoardResult =
+  | { status: "ok"; board: BoardSnapshot["board"] }
+  | { status: "duplicate_name" }
+  | { status: "duplicate_slug" };
+
+export function createBoard(db: Database, boardId: string, name: string): CreateBoardResult {
+  return db.transaction((): CreateBoardResult => {
+    if (boardNameExists(db, name)) return { status: "duplicate_name" };
+    const slug = boardSlug(name);
+    if (boardSlugExists(db, slug)) return { status: "duplicate_slug" };
     const timestamp = now();
     const workspaceId = "shale-default-workspace";
     if (!db.query("SELECT 1 FROM workspaces WHERE id = ?").get(workspaceId)) {
@@ -491,17 +559,6 @@ export function createBoard(db: Database, boardId: string, name: string): BoardS
         timestamp,
         workspaceId,
       );
-    }
-    const baseSlug = boardSlug(name);
-    let slug = baseSlug;
-    let suffix = 2;
-    while (
-      db
-        .query("SELECT 1 FROM boards WHERE workspace_id = ? AND slug = ? COLLATE NOCASE")
-        .get(workspaceId, slug)
-    ) {
-      slug = `${baseSlug}-${suffix}`;
-      suffix += 1;
     }
     const position = Number(
       (
@@ -524,13 +581,17 @@ export function createBoard(db: Database, boardId: string, name: string): BoardS
     ["Backlog", "In progress", "Done"].forEach((title, columnPosition) => {
       insertColumn.run(randomUUID(), boardId, title, columnPosition, timestamp, timestamp);
     });
-    return { id: boardId, name, slug, workspaceId, revision: 1 };
+    return {
+      status: "ok",
+      board: { id: boardId, name, slug, workspaceId, revision: 1 },
+    };
   })();
 }
 
 export type UpdateBoardResult =
   | { status: "ok"; board: BoardSnapshot["board"] }
   | { status: "conflict"; board: BoardSnapshot["board"] }
+  | { status: "duplicate_name" }
   | { status: "not_found" };
 
 export function updateBoard(
@@ -544,6 +605,7 @@ export function updateBoard(
   if (snapshot.board.revision !== revision) {
     return { status: "conflict", board: snapshot.board };
   }
+  if (boardNameExists(db, name, boardId)) return { status: "duplicate_name" };
   const result = db
     .query(
       `UPDATE boards SET name = ?, revision = revision + 1, updated_at = ?
@@ -555,6 +617,115 @@ export function updateBoard(
     status: "ok",
     board: { ...snapshot.board, name, revision: revision + 1 },
   };
+}
+
+export type UpdateBoardSlugResult =
+  | { status: "ok"; board: BoardSnapshot["board"] }
+  | { status: "conflict"; board: BoardSnapshot["board"] }
+  | { status: "duplicate" }
+  | { status: "not_found" };
+
+export function updateBoardSlug(
+  db: Database,
+  boardId: string,
+  slug: string,
+  revision: number,
+): UpdateBoardSlugResult {
+  const snapshot = getBoardById(db, boardId);
+  if (!snapshot) return { status: "not_found" };
+  if (snapshot.board.revision !== revision) {
+    return { status: "conflict", board: snapshot.board };
+  }
+  if (boardSlugExists(db, slug, boardId)) return { status: "duplicate" };
+  const result = db
+    .query(
+      `UPDATE boards SET slug = ?, revision = revision + 1, updated_at = ?
+      WHERE id = ? AND revision = ? AND trashed_at IS NULL`,
+    )
+    .run(slug, now(), boardId, revision);
+  if (result.changes === 0) return { status: "conflict", board: snapshot.board };
+  return {
+    status: "ok",
+    board: { ...snapshot.board, slug, revision: revision + 1 },
+  };
+}
+
+export function createColumn(
+  db: Database,
+  columnId: string,
+  boardId: string,
+  title: string,
+): Column | null {
+  return db.transaction(() => {
+    if (!getBoardById(db, boardId)) return null;
+    const position = Number(
+      (
+        db
+          .query(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM board_columns WHERE board_id = ? AND trashed_at IS NULL",
+          )
+          .get(boardId) as Row
+      ).position,
+    );
+    const timestamp = now();
+    db.query(
+      `INSERT INTO board_columns
+      (id, board_id, title, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(columnId, boardId, title, position, timestamp, timestamp);
+    return { id: columnId, title, position, revision: 1, cards: [] };
+  })();
+}
+
+export type UpdateColumnResult =
+  | { status: "ok"; column: Column }
+  | { status: "conflict"; column: Column }
+  | { status: "not_found" };
+
+function getColumn(db: Database, columnId: string): Column | null {
+  const row = db
+    .query(
+      `SELECT board_columns.id, board_columns.title, board_columns.position,
+        board_columns.revision, board_columns.board_id
+      FROM board_columns JOIN boards ON boards.id = board_columns.board_id
+      JOIN workspaces ON workspaces.id = boards.workspace_id
+      WHERE board_columns.id = ? AND board_columns.trashed_at IS NULL
+        AND boards.trashed_at IS NULL AND workspaces.trashed_at IS NULL`,
+    )
+    .get(columnId) as Row | null;
+  if (!row) return null;
+  const cards = asRows(
+    db
+      .query(
+        "SELECT id, column_id, title, description, position, revision FROM cards WHERE column_id = ? AND trashed_at IS NULL ORDER BY position",
+      )
+      .all(columnId),
+  ).map((card) => cardFromRow(db, card));
+  return {
+    id: String(row.id),
+    title: String(row.title),
+    position: Number(row.position),
+    revision: Number(row.revision),
+    cards,
+  };
+}
+
+export function updateColumn(
+  db: Database,
+  columnId: string,
+  title: string,
+  revision: number,
+): UpdateColumnResult {
+  const current = getColumn(db, columnId);
+  if (!current) return { status: "not_found" };
+  if (current.revision !== revision) return { status: "conflict", column: current };
+  const result = db
+    .query(
+      `UPDATE board_columns SET title = ?, revision = revision + 1, updated_at = ?
+      WHERE id = ? AND revision = ? AND trashed_at IS NULL`,
+    )
+    .run(title, now(), columnId, revision);
+  if (result.changes === 0) return { status: "conflict", column: current };
+  return { status: "ok", column: { ...current, title, revision: revision + 1 } };
 }
 
 export function createCard(
@@ -684,6 +855,7 @@ export function exportBoard(db: Database, boardId: string): BoardExport | null {
 export type ImportBoardResult =
   | { status: "ok" }
   | { status: "not_found" }
+  | { status: "duplicate_name" }
   | { status: "invalid_data" };
 
 function normalizedPersonName(value: string): string {
@@ -693,6 +865,7 @@ function normalizedPersonName(value: string): string {
 export function importBoard(db: Database, boardId: string, input: BoardExport): ImportBoardResult {
   const board = db.query("SELECT id FROM boards WHERE id = ? AND trashed_at IS NULL").get(boardId);
   if (!board) return { status: "not_found" };
+  if (boardNameExists(db, input.board.name, boardId)) return { status: "duplicate_name" };
 
   const tagIds = new Set<string>();
   const tagNames = new Set<string>();
