@@ -305,7 +305,7 @@ export function getBootstrap(db: Database): Bootstrap {
     const boards = asRows(
       db
         .query(
-          "SELECT id, name, slug, workspace_id FROM boards WHERE workspace_id = ? AND trashed_at IS NULL ORDER BY position",
+          "SELECT id, name, slug, workspace_id, revision FROM boards WHERE workspace_id = ? AND trashed_at IS NULL ORDER BY position",
         )
         .all(workspace.id),
     ).map((board) => ({
@@ -313,6 +313,7 @@ export function getBootstrap(db: Database): Bootstrap {
       name: String(board.name),
       slug: String(board.slug),
       workspaceId: String(board.workspace_id),
+      revision: Number(board.revision),
     }));
     return {
       id: String(workspace.id),
@@ -361,23 +362,7 @@ function cardFromRow(db: Database, row: Row): Card {
   };
 }
 
-export function getBoard(
-  db: Database,
-  workspaceSlug: string,
-  boardSlug: string,
-): BoardSnapshot | null {
-  const row = db
-    .query(
-      `SELECT boards.id AS board_id, boards.name AS board_name, boards.slug AS board_slug,
-        workspaces.id AS workspace_id, workspaces.name AS workspace_name,
-        workspaces.slug AS workspace_slug, workspaces.is_sandbox
-      FROM boards JOIN workspaces ON workspaces.id = boards.workspace_id
-      WHERE workspaces.slug = ? COLLATE NOCASE AND boards.slug = ? COLLATE NOCASE
-        AND workspaces.trashed_at IS NULL AND boards.trashed_at IS NULL`,
-    )
-    .get(workspaceSlug, boardSlug) as Row | null;
-  if (!row) return null;
-
+function boardSnapshotFromRow(db: Database, row: Row): BoardSnapshot {
   const columns = asRows(
     db
       .query(
@@ -424,10 +409,44 @@ export function getBoard(
       name: String(row.board_name),
       slug: String(row.board_slug),
       workspaceId: String(row.workspace_id),
+      revision: Number(row.board_revision),
     },
     tags,
     columns,
   };
+}
+
+export function getBoard(
+  db: Database,
+  workspaceSlug: string,
+  boardSlug: string,
+): BoardSnapshot | null {
+  const row = db
+    .query(
+      `SELECT boards.id AS board_id, boards.name AS board_name, boards.slug AS board_slug,
+        boards.revision AS board_revision, workspaces.id AS workspace_id,
+        workspaces.name AS workspace_name, workspaces.slug AS workspace_slug,
+        workspaces.is_sandbox
+      FROM boards JOIN workspaces ON workspaces.id = boards.workspace_id
+      WHERE workspaces.slug = ? COLLATE NOCASE AND boards.slug = ? COLLATE NOCASE
+        AND workspaces.trashed_at IS NULL AND boards.trashed_at IS NULL`,
+    )
+    .get(workspaceSlug, boardSlug) as Row | null;
+  return row ? boardSnapshotFromRow(db, row) : null;
+}
+
+export function getBoardById(db: Database, boardId: string): BoardSnapshot | null {
+  const row = db
+    .query(
+      `SELECT boards.id AS board_id, boards.name AS board_name, boards.slug AS board_slug,
+        boards.revision AS board_revision, workspaces.id AS workspace_id,
+        workspaces.name AS workspace_name, workspaces.slug AS workspace_slug,
+        workspaces.is_sandbox
+      FROM boards JOIN workspaces ON workspaces.id = boards.workspace_id
+      WHERE boards.id = ? AND workspaces.trashed_at IS NULL AND boards.trashed_at IS NULL`,
+    )
+    .get(boardId) as Row | null;
+  return row ? boardSnapshotFromRow(db, row) : null;
 }
 
 export function getCard(db: Database, cardId: string): Card | null {
@@ -437,6 +456,142 @@ export function getCard(db: Database, cardId: string): Card | null {
     )
     .get(cardId) as Row | null;
   return row ? cardFromRow(db, row) : null;
+}
+
+function boardSlug(value: string): string {
+  return (
+    value
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase("en-US")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "board"
+  );
+}
+
+export function createBoard(db: Database, boardId: string, name: string): BoardSnapshot["board"] {
+  return db.transaction(() => {
+    const timestamp = now();
+    const workspaceId = "shale-default-workspace";
+    if (!db.query("SELECT 1 FROM workspaces WHERE id = ?").get(workspaceId)) {
+      const workspacePosition = Number(
+        (
+          db
+            .query("SELECT COALESCE(MAX(position), -1) + 1 AS position FROM workspaces")
+            .get() as Row
+        ).position,
+      );
+      db.query(
+        `INSERT INTO workspaces
+        (id, name, slug, is_sandbox, position, created_at, updated_at)
+        VALUES (?, 'Boards', 'boards', 0, ?, ?, ?)`,
+      ).run(workspaceId, workspacePosition, timestamp, timestamp);
+    } else {
+      db.query("UPDATE workspaces SET trashed_at = NULL, updated_at = ? WHERE id = ?").run(
+        timestamp,
+        workspaceId,
+      );
+    }
+    const baseSlug = boardSlug(name);
+    let slug = baseSlug;
+    let suffix = 2;
+    while (
+      db
+        .query("SELECT 1 FROM boards WHERE workspace_id = ? AND slug = ? COLLATE NOCASE")
+        .get(workspaceId, slug)
+    ) {
+      slug = `${baseSlug}-${suffix}`;
+      suffix += 1;
+    }
+    const position = Number(
+      (
+        db
+          .query(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM boards WHERE workspace_id = ?",
+          )
+          .get(workspaceId) as Row
+      ).position,
+    );
+    db.query(
+      `INSERT INTO boards
+      (id, workspace_id, name, slug, position, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(boardId, workspaceId, name, slug, position, timestamp, timestamp);
+    const insertColumn = db.query(
+      `INSERT INTO board_columns
+      (id, board_id, title, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    ["Backlog", "In progress", "Done"].forEach((title, columnPosition) => {
+      insertColumn.run(randomUUID(), boardId, title, columnPosition, timestamp, timestamp);
+    });
+    return { id: boardId, name, slug, workspaceId, revision: 1 };
+  })();
+}
+
+export type UpdateBoardResult =
+  | { status: "ok"; board: BoardSnapshot["board"] }
+  | { status: "conflict"; board: BoardSnapshot["board"] }
+  | { status: "not_found" };
+
+export function updateBoard(
+  db: Database,
+  boardId: string,
+  name: string,
+  revision: number,
+): UpdateBoardResult {
+  const snapshot = getBoardById(db, boardId);
+  if (!snapshot) return { status: "not_found" };
+  if (snapshot.board.revision !== revision) {
+    return { status: "conflict", board: snapshot.board };
+  }
+  const result = db
+    .query(
+      `UPDATE boards SET name = ?, revision = revision + 1, updated_at = ?
+      WHERE id = ? AND revision = ? AND trashed_at IS NULL`,
+    )
+    .run(name, now(), boardId, revision);
+  if (result.changes === 0) return { status: "conflict", board: snapshot.board };
+  return {
+    status: "ok",
+    board: { ...snapshot.board, name, revision: revision + 1 },
+  };
+}
+
+export function createCard(
+  db: Database,
+  cardId: string,
+  columnId: string,
+  title: string,
+  description: string,
+): Card | null {
+  return db.transaction(() => {
+    const column = db
+      .query(
+        `SELECT board_columns.id FROM board_columns
+        JOIN boards ON boards.id = board_columns.board_id
+        JOIN workspaces ON workspaces.id = boards.workspace_id
+        WHERE board_columns.id = ? AND board_columns.trashed_at IS NULL
+          AND boards.trashed_at IS NULL AND workspaces.trashed_at IS NULL`,
+      )
+      .get(columnId);
+    if (!column) return null;
+    const position = Number(
+      (
+        db
+          .query(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS position FROM cards WHERE column_id = ? AND trashed_at IS NULL",
+          )
+          .get(columnId) as Row
+      ).position,
+    );
+    const timestamp = now();
+    db.query(
+      `INSERT INTO cards
+      (id, column_id, title, description, position, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(cardId, columnId, title, description, position, timestamp, timestamp);
+    return getCard(db, cardId);
+  })();
 }
 
 export function exportBoard(db: Database, boardId: string): BoardExport | null {
@@ -849,15 +1004,6 @@ export function updateCardAssignees(
 }
 
 export function getTrash(db: Database): TrashItem[] {
-  const workspaces = asRows(
-    db.query("SELECT id, name, trashed_at FROM workspaces WHERE trashed_at IS NOT NULL").all(),
-  ).map((row) => ({
-    id: String(row.id),
-    type: "workspace" as const,
-    name: String(row.name),
-    context: "Workspace",
-    trashedAt: String(row.trashed_at),
-  }));
   const boards = asRows(
     db
       .query(
@@ -870,7 +1016,7 @@ export function getTrash(db: Database): TrashItem[] {
     id: String(row.id),
     type: "board" as const,
     name: String(row.name),
-    context: String(row.workspace_name),
+    context: "Board",
     trashedAt: String(row.trashed_at),
   }));
   const columns = asRows(
@@ -889,7 +1035,7 @@ export function getTrash(db: Database): TrashItem[] {
     id: String(row.id),
     type: "column" as const,
     name: String(row.title),
-    context: `${String(row.workspace_name)} / ${String(row.board_name)}`,
+    context: String(row.board_name),
     trashedAt: String(row.trashed_at),
   }));
   const cards = asRows(
@@ -909,10 +1055,10 @@ export function getTrash(db: Database): TrashItem[] {
     id: String(row.id),
     type: "card" as const,
     name: String(row.title),
-    context: `${String(row.workspace_name)} / ${String(row.board_name)} / ${String(row.column_title)}`,
+    context: `${String(row.board_name)} / ${String(row.column_title)}`,
     trashedAt: String(row.trashed_at),
   }));
-  return [...workspaces, ...boards, ...columns, ...cards].sort((left, right) =>
+  return [...boards, ...columns, ...cards].sort((left, right) =>
     right.trashedAt.localeCompare(left.trashedAt),
   );
 }

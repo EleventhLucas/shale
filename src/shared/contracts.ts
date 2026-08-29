@@ -56,6 +56,7 @@ export const boardSummarySchema = z.object({
   name: z.string(),
   slug: z.string(),
   workspaceId: idSchema,
+  revision: z.number().int().positive(),
 });
 
 export const workspaceSummarySchema = z.object({
@@ -90,6 +91,20 @@ export const unlockInputSchema = z.object({
 
 export const createParticipantInputSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
+});
+
+export const createBoardInputSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+});
+
+export const updateBoardInputSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  revision: z.number().int().positive(),
+});
+
+export const createCardInputSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  description: z.string().max(50_000).optional().default(""),
 });
 
 export const updateParticipantInputSchema = z.object({

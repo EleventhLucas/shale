@@ -228,6 +228,7 @@ export function App() {
   const activeParticipant = bootstrap.data?.participants.find(
     (participant) => participant.id === participantId && participant.active,
   );
+  const boards = bootstrap.data?.workspaces.flatMap((workspace) => workspace.boards) ?? [];
 
   function requestEditing(): boolean {
     if (!session.data?.unlocked) {
@@ -247,18 +248,15 @@ export function App() {
               <LoadingScreen />
             ) : bootstrap.isError ? (
               <EmptyState message="Shale's server is unavailable. Check the server launch output." />
-            ) : bootstrap.data?.workspaces[0]?.boards[0] ? (
-              <Navigate
-                replace
-                to={`/w/${bootstrap.data.workspaces[0].slug}/b/${bootstrap.data.workspaces[0].boards[0].slug}`}
-              />
+            ) : boards[0] ? (
+              <Navigate replace to={`/b/${encodeURIComponent(boards[0].id)}`} />
             ) : (
               <EmptyState />
             )
           }
         />
         <Route
-          path="/w/:workspaceSlug/b/:boardSlug"
+          path="/b/:boardId"
           element={
             <BoardPage
               participant={activeParticipant}
@@ -271,7 +269,7 @@ export function App() {
           }
         />
         <Route
-          path="/w/:workspaceSlug/b/:boardSlug/c/:cardId"
+          path="/b/:boardId/c/:cardId"
           element={
             <BoardPage
               participant={activeParticipant}
@@ -283,6 +281,7 @@ export function App() {
             />
           }
         />
+        <Route path="/w/*" element={<Navigate replace to="/" />} />
       </Routes>
       {unlockOpen && (
         <UnlockDialog
@@ -320,13 +319,15 @@ function BoardPage({
   openUnlock: () => void;
   openIdentity: () => void;
 }) {
-  const { workspaceSlug = "", boardSlug = "", cardId } = useParams();
+  const { boardId = "", cardId } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [navOpen, setNavOpen] = useState(true);
   const [search, setSearch] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [createBoardOpen, setCreateBoardOpen] = useState(false);
+  const [createCardColumn, setCreateCardColumn] = useState<Column>();
   const [pendingImport, setPendingImport] = useState<{ fileName: string; data: BoardExport }>();
   const [boardFileError, setBoardFileError] = useState<string>();
   const importInput = useRef<HTMLInputElement>(null);
@@ -339,14 +340,14 @@ function BoardPage({
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
   const bootstrap = useQuery({ queryKey: ["bootstrap"], queryFn: api.bootstrap });
   const board = useQuery({
-    queryKey: ["board", workspaceSlug, boardSlug],
-    queryFn: () => api.board(workspaceSlug, boardSlug),
+    queryKey: ["board", boardId],
+    queryFn: () => api.board(boardId),
   });
   const lock = useMutation({
     mutationFn: api.lock,
     onSuccess: (data) => queryClient.setQueryData(["session"], data),
   });
-  const boardKey = ["board", workspaceSlug, boardSlug] as const;
+  const boardKey = ["board", boardId] as const;
   const exportFile = useMutation({
     mutationFn: () => api.exportBoard(board.data?.board.id ?? ""),
     onSuccess: (data) => {
@@ -373,7 +374,7 @@ function BoardPage({
     onSuccess: async () => {
       setPendingImport(undefined);
       setBoardFileError(undefined);
-      navigate(`/w/${workspaceSlug}/b/${boardSlug}`);
+      navigate(`/b/${encodeURIComponent(boardId)}`);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: boardKey }),
         queryClient.invalidateQueries({ queryKey: ["bootstrap"] }),
@@ -419,6 +420,7 @@ function BoardPage({
     .flatMap((column) => column.cards)
     .find((card) => card.id === activeCardId);
   const people = bootstrap.data?.participants.filter((person) => person.active) ?? [];
+  const boards = bootstrap.data?.workspaces.flatMap((workspace) => workspace.boards) ?? [];
   const query = search.trim().toLocaleLowerCase();
 
   function requestMove(card: Card, targetColumnId: string, targetPosition: number): void {
@@ -482,94 +484,49 @@ function BoardPage({
 
   return (
     <div className={`app-shell ${navOpen ? "app-shell--nav" : ""}`}>
-      <aside className="sidebar" aria-label="Workspace navigation">
+      <aside className="sidebar" aria-label="Board navigation">
         <div className="brand-row">
           <img className="brand-mark" src="/shale-mark.svg" alt="" />
           <span>SHALE</span>
         </div>
-        <div className="workspace-heading">Workspaces</div>
-        <nav>
-          {bootstrap.data?.workspaces.map((workspace) => (
-            <div className="workspace-group" key={workspace.id}>
-              <div className="workspace-name">{workspace.name}</div>
-              {workspace.boards.map((item) => (
-                <a
-                  className={
-                    item.slug === boardSlug ? "board-link board-link--active" : "board-link"
-                  }
-                  href={`/w/${workspace.slug}/b/${item.slug}`}
-                  key={item.id}
-                >
-                  <span className="board-dot" />
-                  {item.name}
-                </a>
-              ))}
-            </div>
+        <div className="board-nav-heading">
+          <span>Boards</span>
+          <button
+            type="button"
+            aria-label="Create board"
+            title="Create board"
+            onClick={() => {
+              if (requestEditing()) setCreateBoardOpen(true);
+            }}
+          >
+            <Plus size={15} />
+          </button>
+        </div>
+        <nav className="board-list">
+          {boards.map((item) => (
+            <a
+              className={item.id === boardId ? "board-link board-link--active" : "board-link"}
+              href={`/b/${encodeURIComponent(item.id)}`}
+              key={item.id}
+            >
+              <span className="board-dot" />
+              {item.name}
+            </a>
           ))}
         </nav>
-        <div className="sidebar-footer">
-          <input
-            ref={importInput}
-            className="sr-only"
-            type="file"
-            accept=".json,.shale.json,application/json"
-            aria-label="Choose a Shale board file to import"
-            onChange={(event) => {
-              void chooseImportFile(event.target.files?.[0]);
-              event.currentTarget.value = "";
-            }}
-          />
-          <button
-            type="button"
-            aria-label="Import board"
-            title="Import board"
-            onClick={() => {
-              if (requestEditing()) importInput.current?.click();
-            }}
-          >
-            <Upload size={17} />
-          </button>
-          <button
-            type="button"
-            aria-label="Export board"
-            title="Export board"
-            disabled={exportFile.isPending}
-            onClick={() => {
-              if (requestEditing()) exportFile.mutate();
-            }}
-          >
-            <Download size={17} />
-          </button>
-          <button
-            type="button"
-            aria-label="Open Trash"
-            title="Trash"
-            onClick={() => {
-              if (requestEditing()) setTrashOpen(true);
-            }}
-          >
-            <Trash2 size={17} />
-          </button>
-          <button
-            type="button"
-            aria-label="Open settings"
-            title="Settings"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings size={17} />
-          </button>
-          {boardFileError && (
-            <span
-              className="sidebar-file-error"
-              role="alert"
-              aria-label={boardFileError}
-              title={boardFileError}
-            >
-              !
-            </span>
-          )}
-        </div>
       </aside>
+
+      <input
+        ref={importInput}
+        className="sr-only"
+        type="file"
+        accept=".json,.shale.json,application/json"
+        aria-label="Choose a Shale board file to import"
+        onChange={(event) => {
+          void chooseImportFile(event.target.files?.[0]);
+          event.currentTarget.value = "";
+        }}
+      />
 
       <main className="board-main">
         <header className="topbar">
@@ -582,11 +539,18 @@ function BoardPage({
             {navOpen ? <ChevronLeft size={18} /> : <Menu size={18} />}
           </Button>
           <div className="breadcrumbs">
-            <span>{board.data.workspace.name}</span>
-            <b>/</b>
             <strong>{board.data.board.name}</strong>
           </div>
           <div className="topbar-actions">
+            <Button
+              variant="quiet"
+              size="icon"
+              aria-label="Open settings"
+              title="Settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings size={17} />
+            </Button>
             {session.data?.unlocked ? (
               <>
                 <Button variant="quiet" size="small" onClick={openIdentity}>
@@ -601,9 +565,7 @@ function BoardPage({
                   <Button variant="quiet" size="small" onClick={() => lock.mutate()}>
                     <LockKeyhole size={15} /> Lock
                   </Button>
-                ) : (
-                  <span className="public-editing">Public editing</span>
-                )}
+                ) : null}
               </>
             ) : (
               <Button size="small" onClick={openUnlock}>
@@ -646,8 +608,11 @@ function BoardPage({
                 people={people}
                 query={query}
                 onOpen={(card) =>
-                  navigate(`/w/${workspaceSlug}/b/${boardSlug}/c/${encodeURIComponent(card.id)}`)
+                  navigate(`/b/${encodeURIComponent(boardId)}/c/${encodeURIComponent(card.id)}`)
                 }
+                onCreate={() => {
+                  if (requestEditing()) setCreateCardColumn(column);
+                }}
               />
             ))}
           </section>
@@ -661,32 +626,61 @@ function BoardPage({
         <CardDrawer
           key={cardId}
           card={selectedCard}
-          boardKey={["board", workspaceSlug, boardSlug]}
+          boardKey={["board", boardId]}
           tags={board.data.tags}
           people={people}
           participant={participant}
           requestEditing={requestEditing}
           openIdentity={openIdentity}
-          onClose={() => navigate(`/w/${workspaceSlug}/b/${boardSlug}`)}
-          onTrashed={() => navigate(`/w/${workspaceSlug}/b/${boardSlug}`)}
+          onClose={() => navigate(`/b/${encodeURIComponent(boardId)}`)}
+          onTrashed={() => navigate(`/b/${encodeURIComponent(boardId)}`)}
         />
       )}
       {settingsOpen && (
         <SettingsDialog
+          board={board.data.board}
           tags={board.data.tags}
           boardId={board.data.board.id}
-          boardKey={["board", workspaceSlug, boardSlug]}
+          boardKey={["board", boardId]}
           people={people}
           requestEditing={requestEditing}
           theme={theme}
           setTheme={setTheme}
+          boardFileError={boardFileError}
+          exportPending={exportFile.isPending}
+          onImport={() => {
+            setSettingsOpen(false);
+            importInput.current?.click();
+          }}
+          onExport={() => exportFile.mutate()}
+          onOpenArchive={() => {
+            setSettingsOpen(false);
+            setTrashOpen(true);
+          }}
           onClose={() => setSettingsOpen(false)}
         />
       )}
       {trashOpen && (
-        <TrashDialog
-          boardKey={["board", workspaceSlug, boardSlug]}
-          onClose={() => setTrashOpen(false)}
+        <TrashDialog boardKey={["board", boardId]} onClose={() => setTrashOpen(false)} />
+      )}
+      {createBoardOpen && (
+        <CreateBoardDialog
+          onClose={() => setCreateBoardOpen(false)}
+          onCreated={(createdBoardId) => {
+            setCreateBoardOpen(false);
+            navigate(`/b/${encodeURIComponent(createdBoardId)}`);
+          }}
+        />
+      )}
+      {createCardColumn && (
+        <CreateCardDialog
+          column={createCardColumn}
+          boardKey={["board", boardId]}
+          onClose={() => setCreateCardColumn(undefined)}
+          onCreated={(card) => {
+            setCreateCardColumn(undefined);
+            navigate(`/b/${encodeURIComponent(boardId)}/c/${encodeURIComponent(card.id)}`);
+          }}
         />
       )}
       {pendingImport && (
@@ -751,11 +745,13 @@ function BoardColumn({
   people,
   query,
   onOpen,
+  onCreate,
 }: {
   column: Column;
   people: Participant[];
   query: string;
   onOpen: (card: Card) => void;
+  onCreate: () => void;
 }) {
   const { isOver, setNodeRef } = useDroppable({
     id: column.id,
@@ -772,7 +768,12 @@ function BoardColumn({
     <div className={`column ${isOver ? "column--over" : ""}`} ref={setNodeRef}>
       <div className="column-heading">
         <h2>{column.title}</h2>
-        <span>{cards.length}</span>
+        <div className="column-heading-actions">
+          <span>{cards.length}</span>
+          <button type="button" aria-label={`Add card to ${column.title}`} onClick={onCreate}>
+            <Plus size={14} />
+          </button>
+        </div>
       </div>
       <SortableContext items={cards.map((card) => card.id)} strategy={verticalListSortingStrategy}>
         <div className="card-list">
@@ -1565,7 +1566,158 @@ function PersonManagerRow({ person, boardKey }: { person: Participant; boardKey:
   );
 }
 
+function CreateBoardDialog({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (boardId: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState("");
+  const create = useMutation({
+    mutationFn: () => api.createBoard(name.trim()),
+    onSuccess: async (board) => {
+      await queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+      onCreated(board.id);
+    },
+  });
+  return (
+    <Dialog title="Create board" onClose={onClose}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          create.mutate();
+        }}
+      >
+        <label className="field-label" htmlFor="new-board-name">
+          Board name
+        </label>
+        <input
+          className="text-input"
+          id="new-board-name"
+          value={name}
+          maxLength={200}
+          autoFocus
+          onChange={(event) => setName(event.target.value)}
+        />
+        {create.error && <p className="form-error">{create.error.message}</p>}
+        <div className="dialog-actions">
+          <Button type="button" variant="quiet" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={!name.trim() || create.isPending}>
+            <Plus size={15} /> {create.isPending ? "Creating…" : "Create board"}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function CreateCardDialog({
+  column,
+  boardKey,
+  onClose,
+  onCreated,
+}: {
+  column: Column;
+  boardKey: string[];
+  onClose: () => void;
+  onCreated: (card: Card) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [title, setTitle] = useState("");
+  const create = useMutation({
+    mutationFn: () => api.createCard(column.id, title.trim()),
+    onSuccess: async (card) => {
+      await queryClient.invalidateQueries({ queryKey: boardKey });
+      onCreated(card);
+    },
+  });
+  return (
+    <Dialog title={`Add card to ${column.title}`} onClose={onClose}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          create.mutate();
+        }}
+      >
+        <label className="field-label" htmlFor="new-card-title">
+          Card title
+        </label>
+        <input
+          className="text-input"
+          id="new-card-title"
+          value={title}
+          maxLength={200}
+          autoFocus
+          onChange={(event) => setTitle(event.target.value)}
+        />
+        {create.error && <p className="form-error">{create.error.message}</p>}
+        <div className="dialog-actions">
+          <Button type="button" variant="quiet" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={!title.trim() || create.isPending}>
+            <Plus size={15} /> {create.isPending ? "Adding…" : "Add card"}
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function BoardNameField({
+  board,
+  boardKey,
+}: {
+  board: BoardSnapshot["board"];
+  boardKey: string[];
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState(board.name);
+  const previousBoard = useRef(board);
+  const update = useMutation({
+    mutationFn: ({ nextName, revision }: { nextName: string; revision: number }) =>
+      api.updateBoard(board.id, { name: nextName, revision }),
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: boardKey }),
+        queryClient.invalidateQueries({ queryKey: ["bootstrap"] }),
+      ]);
+    },
+  });
+  useEffect(() => {
+    const previous = previousBoard.current;
+    setName((current) => (current.trim() === previous.name ? board.name : current));
+    previousBoard.current = board;
+  }, [board]);
+  const persist = useCallback(() => {
+    const nextName = name.trim();
+    if (!nextName || nextName === board.name || update.isPending) return;
+    update.mutate({ nextName, revision: board.revision });
+  }, [board, name, update]);
+  useEffect(() => {
+    const timeout = window.setTimeout(persist, 400);
+    return () => window.clearTimeout(timeout);
+  }, [persist]);
+  return (
+    <label className="misc-board-name">
+      <span>Board name</span>
+      <input
+        className="text-input"
+        value={name}
+        maxLength={200}
+        onBlur={persist}
+        onChange={(event) => setName(event.target.value)}
+      />
+    </label>
+  );
+}
+
 function SettingsDialog({
+  board,
   tags,
   people,
   boardId,
@@ -1573,8 +1725,14 @@ function SettingsDialog({
   requestEditing,
   theme,
   setTheme,
+  boardFileError,
+  exportPending,
+  onImport,
+  onExport,
+  onOpenArchive,
   onClose,
 }: {
+  board: BoardSnapshot["board"];
   tags: Tag[];
   people: Participant[];
   boardId: string;
@@ -1582,10 +1740,15 @@ function SettingsDialog({
   requestEditing: () => boolean;
   theme: "light" | "dark";
   setTheme: (value: "light" | "dark") => void;
+  boardFileError?: string;
+  exportPending: boolean;
+  onImport: () => void;
+  onExport: () => void;
+  onOpenArchive: () => void;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [section, setSection] = useState<"appearance" | "tags" | "people">("appearance");
+  const [section, setSection] = useState<"appearance" | "tags" | "people" | "misc">("appearance");
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState<TagColor>(defaultTagColor);
   const [newPersonName, setNewPersonName] = useState("");
@@ -1650,6 +1813,19 @@ function SettingsDialog({
         >
           Persons
         </button>
+        <button
+          id="settings-misc-tab"
+          className={section === "misc" ? "settings-tab settings-tab--active" : "settings-tab"}
+          type="button"
+          role="tab"
+          aria-selected={section === "misc"}
+          aria-controls="settings-misc-panel"
+          onClick={() => {
+            if (requestEditing()) setSection("misc");
+          }}
+        >
+          Misc.
+        </button>
       </div>
 
       {section === "appearance" ? (
@@ -1706,7 +1882,7 @@ function SettingsDialog({
           </form>
           {create.error && <p className="form-error">{create.error.message}</p>}
         </section>
-      ) : (
+      ) : section === "people" ? (
         <section
           className="settings-section settings-panel"
           id="settings-people-panel"
@@ -1743,6 +1919,28 @@ function SettingsDialog({
             </Button>
           </form>
           {createPerson.error && <p className="form-error">{createPerson.error.message}</p>}
+        </section>
+      ) : (
+        <section
+          className="settings-section settings-panel"
+          id="settings-misc-panel"
+          role="tabpanel"
+          aria-labelledby="settings-misc-tab"
+        >
+          <p className="dialog-copy">Transfer this board or open the recoverable archive.</p>
+          <BoardNameField board={board} boardKey={boardKey} />
+          <div className="misc-actions">
+            <Button type="button" variant="quiet" onClick={onImport}>
+              <Upload size={16} /> Import board
+            </Button>
+            <Button type="button" variant="quiet" disabled={exportPending} onClick={onExport}>
+              <Download size={16} /> {exportPending ? "Exporting…" : "Export board"}
+            </Button>
+            <Button type="button" variant="quiet" onClick={onOpenArchive}>
+              <Trash2 size={16} /> Archive
+            </Button>
+          </div>
+          {boardFileError && <p className="form-error">{boardFileError}</p>}
         </section>
       )}
     </Dialog>
@@ -1811,12 +2009,12 @@ function TrashDialog({ boardKey, onClose }: { boardKey: string[]; onClose: () =>
   const error = restore.error ?? purge.error;
 
   return (
-    <Dialog title="Trash" onClose={onClose}>
+    <Dialog title="Archive" onClose={onClose}>
       <p className="dialog-copy">
         Restore recoverable items or permanently delete them. Items stay here until you choose.
       </p>
       {trash.isLoading ? (
-        <div className="trash-empty">Loading Trash…</div>
+        <div className="trash-empty">Loading archive…</div>
       ) : trash.error ? (
         <p className="form-error">{trash.error.message}</p>
       ) : trash.data?.items.length ? (
@@ -1883,7 +2081,7 @@ function TrashDialog({ boardKey, onClose }: { boardKey: string[]; onClose: () =>
       ) : (
         <div className="trash-empty">
           <Trash2 size={22} />
-          <span>Trash is empty.</span>
+          <span>Archive is empty.</span>
         </div>
       )}
       {error && <p className="form-error">{error.message}</p>}

@@ -424,6 +424,66 @@ describe("Shale vertical slice", () => {
     ).toBe(false);
   });
 
+  it("lists boards globally and creates cards directly in a column", async () => {
+    const app = createApp(db, {
+      port: 3000,
+      dataDir: ".",
+      publicOrigin: origin,
+      sessionDays: 30,
+    });
+    const globalSample = await app.request("/_shale/board/sandbox-board");
+    expect(globalSample.status).toBe(200);
+
+    const createdResponse = await app.request("/_shale/boards", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ name: "Second Board" }),
+    });
+    expect(createdResponse.status).toBe(201);
+    const created = (await createdResponse.json()) as { id: string; revision: number };
+    expect(created.revision).toBe(1);
+
+    const renamedResponse = await app.request(`/_shale/boards/${created.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ name: "Renamed Board", revision: created.revision }),
+    });
+    expect(renamedResponse.status).toBe(200);
+    expect(await renamedResponse.json()).toMatchObject({ name: "Renamed Board", revision: 2 });
+
+    const createdBoard = (await (await app.request(`/_shale/board/${created.id}`)).json()) as {
+      board: { name: string };
+      columns: Array<{ id: string; title: string; cards: unknown[] }>;
+    };
+    expect(createdBoard.board.name).toBe("Renamed Board");
+    expect(createdBoard.columns.map((column) => column.title)).toEqual([
+      "Backlog",
+      "In progress",
+      "Done",
+    ]);
+
+    const cardResponse = await app.request(`/_shale/columns/${createdBoard.columns[0].id}/cards`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ title: "Created from the column" }),
+    });
+    expect(cardResponse.status).toBe(201);
+    expect(await cardResponse.json()).toMatchObject({
+      title: "Created from the column",
+      columnId: createdBoard.columns[0].id,
+      position: 0,
+    });
+
+    const bootstrap = (await (await app.request("/_shale/bootstrap")).json()) as {
+      workspaces: Array<{ boards: Array<{ id: string; name: string }> }>;
+    };
+    expect(
+      bootstrap.workspaces
+        .flatMap((workspace) => workspace.boards)
+        .some((board) => board.id === created.id && board.name === "Renamed Board"),
+    ).toBe(true);
+  });
+
   it("restores and permanently deletes items through the recoverable trash", async () => {
     const app = createApp(db, {
       port: 3000,

@@ -6,11 +6,14 @@ import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
 import {
   boardExportSchema,
+  createBoardInputSchema,
+  createCardInputSchema,
   createParticipantInputSchema,
   createTagInputSchema,
   moveCardInputSchema,
   trashTargetSchema,
   unlockInputSchema,
+  updateBoardInputSchema,
   updateCardAssigneesInputSchema,
   updateCardInputSchema,
   updateCardTagsInputSchema,
@@ -20,11 +23,14 @@ import {
 import { type AppVariables, createAuth } from "./auth";
 import type { AppConfig } from "./config";
 import {
+  createBoard,
+  createCard,
   createTag,
   deleteParticipant,
   deleteTag,
   exportBoard,
   getBoard,
+  getBoardById,
   getBootstrap,
   getCard,
   getParticipants,
@@ -34,6 +40,7 @@ import {
   permanentlyDeleteEntity,
   restoreEntity,
   trashEntity,
+  updateBoard,
   updateCardAssignees,
   updateCardTags,
   updateParticipant,
@@ -105,6 +112,60 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
     const board = getBoard(db, c.req.param("workspaceSlug"), c.req.param("boardSlug"));
     return board ? c.json(board) : c.json({ error: "Board not found." }, 404);
   });
+
+  app.get("/_shale/board/:boardId", (c) => {
+    const board = getBoardById(db, c.req.param("boardId"));
+    return board ? c.json(board) : c.json({ error: "Board not found." }, 404);
+  });
+
+  app.post(
+    "/_shale/boards",
+    auth.requireSession,
+    zValidator("json", createBoardInputSchema),
+    (c) => {
+      const board = createBoard(db, randomUUID(), c.req.valid("json").name);
+      hub.publish({ resource: "board", id: board.id, revision: board.revision });
+      return c.json(board, 201);
+    },
+  );
+
+  app.patch(
+    "/_shale/boards/:boardId",
+    auth.requireSession,
+    zValidator("json", updateBoardInputSchema),
+    (c) => {
+      const input = c.req.valid("json");
+      const result = updateBoard(db, c.req.param("boardId"), input.name, input.revision);
+      if (result.status === "not_found") return c.json({ error: "Board not found." }, 404);
+      if (result.status === "conflict") {
+        return c.json(
+          { error: "This board changed since Settings opened.", current: result.board },
+          409,
+        );
+      }
+      hub.publish({ resource: "board", id: result.board.id, revision: result.board.revision });
+      return c.json(result.board);
+    },
+  );
+
+  app.post(
+    "/_shale/columns/:columnId/cards",
+    auth.requireSession,
+    zValidator("json", createCardInputSchema),
+    (c) => {
+      const input = c.req.valid("json");
+      const card = createCard(
+        db,
+        randomUUID(),
+        c.req.param("columnId"),
+        input.title,
+        input.description,
+      );
+      if (!card) return c.json({ error: "Column not found." }, 404);
+      hub.publish({ resource: "card", id: card.id, revision: card.revision });
+      return c.json(card, 201);
+    },
+  );
 
   app.get("/_shale/board-files/:boardId", auth.requireSession, (c) => {
     const exported = exportBoard(db, c.req.param("boardId"));

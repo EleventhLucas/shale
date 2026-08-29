@@ -2,6 +2,7 @@ import {
   type BoardExport,
   boardExportSchema,
   boardSnapshotSchema,
+  boardSummarySchema,
   bootstrapSchema,
   type Card,
   cardSchema,
@@ -56,11 +57,25 @@ export const api = {
   lock: async () =>
     sessionStateSchema.parse(await request("/_shale/session", { method: "DELETE" })),
   bootstrap: async () => bootstrapSchema.parse(await request("/_shale/bootstrap")),
-  board: async (workspaceSlug: string, boardSlug: string) =>
-    boardSnapshotSchema.parse(
-      await request(
-        `/_shale/boards/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(boardSlug)}`,
-      ),
+  board: async (boardId: string) =>
+    boardSnapshotSchema.parse(await request(`/_shale/board/${encodeURIComponent(boardId)}`)),
+  createBoard: async (name: string) =>
+    boardSummarySchema.parse(
+      await request("/_shale/boards", { method: "POST", body: JSON.stringify({ name }) }),
+    ),
+  updateBoard: async (boardId: string, input: { name: string; revision: number }) =>
+    boardSummarySchema.parse(
+      await request(`/_shale/boards/${encodeURIComponent(boardId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }),
+    ),
+  createCard: async (columnId: string, title: string, description = ""): Promise<Card> =>
+    cardSchema.parse(
+      await request(`/_shale/columns/${encodeURIComponent(columnId)}/cards`, {
+        method: "POST",
+        body: JSON.stringify({ title, description }),
+      }),
     ),
   createParticipant: async (displayName: string) =>
     participantSchema.parse(

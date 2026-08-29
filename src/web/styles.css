@@ -185,8 +185,11 @@ a {
   opacity: 0.9;
 }
 
-.workspace-heading {
-  padding: 1.35rem 1.2rem 0.65rem;
+.board-nav-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.15rem 1.2rem 0.65rem;
   color: var(--faint);
   font-size: 0.65rem;
   font-weight: 750;
@@ -194,15 +197,31 @@ a {
   text-transform: uppercase;
 }
 
-.workspace-group {
-  padding: 0 0.65rem 1rem;
+.board-nav-heading button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
 }
 
-.workspace-name {
-  padding: 0.5rem 0.6rem;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 650;
+.board-nav-heading button:hover,
+.board-nav-heading button:focus-visible {
+  background: var(--panel-strong);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.board-list {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0 0.65rem 1rem;
+  overflow-y: auto;
 }
 
 .board-link {
@@ -233,54 +252,6 @@ a {
 .board-link--active .board-dot {
   background: var(--ink);
   border-color: var(--ink);
-}
-
-.sidebar-footer {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: auto;
-  padding: 0.8rem 1rem;
-  border-top: 1px solid var(--line);
-}
-
-.sidebar-footer button {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  padding: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.sidebar-footer button:hover,
-.sidebar-footer button:focus-visible {
-  background: var(--panel-strong);
-  border-color: var(--line);
-  color: var(--ink);
-}
-
-.sidebar-footer button:disabled {
-  cursor: wait;
-  opacity: 0.5;
-}
-
-.sidebar-file-error {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  margin-left: auto;
-  background: #923e38;
-  border-radius: 50%;
-  color: white;
-  cursor: help;
-  font-size: 0.65rem;
-  font-weight: 800;
 }
 
 .board-main {
@@ -328,15 +299,6 @@ a {
   align-items: center;
   gap: 0.55rem;
   margin-left: auto;
-}
-
-.public-editing {
-  padding: 0.35rem 0.55rem;
-  color: var(--muted);
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .board-toolbar {
@@ -432,16 +394,35 @@ a {
   letter-spacing: 0.015em;
 }
 
-.column-heading span {
+.column-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+.column-heading-actions span,
+.column-heading-actions button {
   display: grid;
   min-width: 21px;
   height: 21px;
   place-items: center;
-  margin-left: auto;
   background: var(--sidebar);
+  border: 0;
   border-radius: 5px;
   color: var(--muted);
   font-size: 0.65rem;
+}
+
+.column-heading-actions button {
+  cursor: pointer;
+}
+
+.column-heading-actions button:hover,
+.column-heading-actions button:focus-visible {
+  background: var(--panel-strong);
+  color: var(--ink);
+  outline: 1px solid var(--line-strong);
 }
 
 .card-list {
@@ -1235,7 +1216,7 @@ a {
 
 .settings-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-top: 1rem;
   border-bottom: 1px solid var(--line);
 }
@@ -1284,6 +1265,29 @@ a {
 .theme-toggle {
   min-height: 58px;
   padding: 0.8rem 1rem;
+}
+
+.misc-actions {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1rem;
+}
+
+.misc-actions .button {
+  justify-content: flex-start;
+}
+
+.misc-board-name {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.misc-board-name > span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 720;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .trash-list {

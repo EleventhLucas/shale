@@ -13,7 +13,8 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 
 ## Product and Interface
 
-- Organize content as workspaces -> boards -> columns -> cards. Workspaces are organizational only and do not establish permissions.
+- Organize content as a global list of boards -> columns -> cards. Workspaces are not part of the product or navigation; the legacy workspace table remains only as an internal migration detail for existing databases.
+- Use the left sidebar exclusively as the global board switcher. Unlocked editors can create boards there, and board URLs use stable board IDs rather than workspace-qualified paths.
 - Support column reordering and card reordering or movement between columns on the same board.
   - Provide pointer and keyboard drag-and-drop from the entire card surface; a click still opens card details.
   - Keep post-drop feedback stable; do not animate cards back toward their previous positions.
@@ -23,14 +24,16 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
   - Multiple assignees selected from the instance-wide Persons list, including an optional browser-local Add me shortcut that disappears when the selected person is already assigned.
   - Timestamped plain-text comments with display-name attribution.
 - Ticket due dates and checklists are intentionally omitted. Scheduling belongs to boards and a future sprint-level model rather than individual tickets.
+- Put a compact add button beside each column's card count so an unlocked editor can create a card directly in that column.
 - Title and description use an inline editing mode with explicit Save/Cancel so the card drawer retains its layout. Moves, tags, assignees, and comments persist immediately.
 - Open card details in a right-side drawer by default. Provide a control to switch between drawer and centered-modal presentation and remember that preference in the browser. Card URLs remain directly linkable in either presentation.
 - Show the board title once in the top breadcrumb bar, with a left-aligned board search toolbar below it. Search only the current board's card titles and descriptions. Filters cover tags, assignees, and unassigned cards. Combine categories with AND and selections within a category with OR.
-- Move workspaces, boards, columns, and cards to a recoverable trash. A sidebar Trash panel lists recoverable items with restore controls and individually confirmed permanent deletion. Retain trash indefinitely until an unlocked editor restores or explicitly permanently deletes it.
-- Create a resettable Sample Workspace on a new database. Its Sample Board demonstrates columns, Markdown, editable tags, comments, filtering, trash, and drag-and-drop without adding fake participants. Reset affects only the marked sample workspace and requires confirmation.
-- Match Graphite's compact monochrome design family, including local fonts/icons, light and dark themes, clear focus states, and no remote assets. A top-aligned categorized settings modal opens to Appearance, where one theme toggle lives; Tags contains board tag management and Persons contains instance-wide assignment-person management.
+- Move boards, columns, and cards to a recoverable archive with restore controls and individually confirmed permanent deletion. Retain archived items indefinitely until an unlocked editor restores or explicitly permanently deletes them.
+- Create a resettable Sample Board on a new database. It demonstrates columns, Markdown, editable tags, comments, filtering, the archive, and drag-and-drop without adding fake participants.
+- Match Graphite's compact monochrome design family, including local fonts/icons, light and dark themes, clear focus states, and no remote assets. A top-aligned categorized settings modal opens to Appearance, where one theme toggle lives; Tags contains board tag management, Persons contains instance-wide assignment-person management, and the final Misc. category contains import, export, and archive access.
+- Keep the Settings cog in the board top bar so it remains available whether the board sidebar is open or collapsed. Do not show a passive "Public editing" status label.
 - Give people optional locally stored profile pictures. Resize uploads before saving them and automatically derive each person's accent color from the image's dominant shade; do not expose a manual person-color picker.
-- Put edit-gated board export and import controls in the left sidebar. Export a versioned Shale JSON file containing the board's active columns, cards, tags, assignments, referenced people, and comments. Import replaces the current board transactionally after an explicit destructive confirmation while preserving its workspace and URL.
+- Put edit-gated board export and import controls in the Misc. settings category. Export a versioned Shale JSON file containing the board's active columns, cards, tags, assignments, referenced people, and comments. Import replaces the current board transactionally after an explicit destructive confirmation while preserving its stable board URL.
 - Target current desktop Chrome, Edge, Firefox, and Safari. Keep narrow layouts readable with collapsible navigation and horizontally scrolling boards, but defer polished mobile and touch workflows.
 
 ## Architecture, Data, and Security
@@ -58,7 +61,7 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
   - Issue random opaque sessions, store only hashed session tokens in SQLite, use HttpOnly/SameSite cookies, and expire sessions after 30 days.
   - Password rotation invalidates existing sessions. Provide an explicit Lock Editing action.
   - Validate same-origin mutation requests and document HTTPS through a reverse proxy for non-local deployment.
-- Public readers can view all workspaces, boards, card details, comments, and person names. Add `noindex, nofollow` headers/meta, but clearly document that an unlisted URL is not privacy protection.
+- Public readers can view all boards, card details, comments, and person names. Add `noindex, nofollow` headers/meta, but clearly document that an unlisted URL is not privacy protection.
 - Render card descriptions with CommonMark/GFM and conservative sanitization. Do not render raw HTML or remote images. External links open only after an explicit click with safe browser attributes.
 - Add automatic consistent SQLite snapshots:
   - Run on startup when the newest snapshot is older than the configured interval, then every 24 hours by default.
@@ -89,9 +92,9 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
 
 ## Test and Acceptance Plan
 
-- Unit-test validation, natural ordering, board search/filter combinations, Markdown sanitization, person profiles/uniqueness/deletion, board-file schemas, revisions, session expiry/password rotation, trash restoration, sample reset boundaries, and backup retention.
+- Unit-test validation, natural ordering, board search/filter combinations, Markdown sanitization, person profiles/uniqueness/deletion, board-file schemas, revisions, session expiry/password rotation, archive restoration, sample reset boundaries, and backup retention.
 - Integration-test migrations and CRUD against temporary SQLite databases, transactional card movement and board replacement, board export, concurrent revision conflicts, cascading trash/restore, consistent live-database snapshots, and SSE invalidation delivery.
-- Component-test public read mode, unlock and optional identity prompts, board navigation, card drawer/modal switching, assignments, explicit text saves, immediate card controls, filters, theme behavior, trash, and accessible focus states.
+- Component-test public read mode, unlock and optional identity prompts, global board navigation, card creation, card drawer/modal switching, assignments, explicit text saves, immediate card controls, filters, theme behavior, archive access, and accessible focus states.
 - Use browser tests for pointer and keyboard card movement, deep-linked cards, simultaneous sessions receiving live changes, conflict recovery, sample reset, and persisted browser preferences.
 - Add a bounded Docker smoke test using a temporary volume: start the image with a test password, wait for `/healthz`, confirm the sandbox board renders, unlock editing, perform one card mutation, restart the container, and confirm persistence without touching tracked files.
 - Acceptance requires all tests, type checking, linting, formatting checks, production build, portability/privacy scan, and Linux x64 Docker smoke test to pass. The container must remain functional without outbound network access.
