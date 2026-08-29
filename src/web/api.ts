@@ -67,92 +67,95 @@ export const api = {
         body: JSON.stringify({ displayName }),
       }),
     ),
+  updateParticipant: async (
+    participantId: string,
+    input: { displayName: string; revision: number },
+  ) =>
+    participantSchema.parse(
+      await request(`/_shale/participants/${encodeURIComponent(participantId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      }),
+    ),
+  deleteParticipant: async (participantId: string): Promise<void> => {
+    await request(`/_shale/participants/${encodeURIComponent(participantId)}`, {
+      method: "DELETE",
+    });
+  },
   updateCard: async (
     cardId: string,
     input: { title: string; description: string; revision: number; force?: boolean },
-    participantId: string,
   ): Promise<Card> =>
     cardSchema.parse(
       await request(`/_shale/cards/${encodeURIComponent(cardId)}`, {
         method: "PATCH",
-        headers: { "x-shale-participant": participantId },
         body: JSON.stringify(input),
       }),
     ),
   moveCard: async (
     cardId: string,
     input: { targetColumnId: string; targetPosition: number; revision: number },
-    participantId: string,
   ): Promise<Card> =>
     cardSchema.parse(
       await request(`/_shale/cards/${encodeURIComponent(cardId)}/move`, {
         method: "PATCH",
-        headers: { "x-shale-participant": participantId },
         body: JSON.stringify(input),
       }),
     ),
-  createTag: async (
-    boardId: string,
-    name: string,
-    color: TagColor,
-    participantId: string,
-  ): Promise<Tag> =>
+  createTag: async (boardId: string, name: string, color: TagColor): Promise<Tag> =>
     tagSchema.parse(
       await request(`/_shale/boards/${encodeURIComponent(boardId)}/tags`, {
         method: "POST",
-        headers: { "x-shale-participant": participantId },
         body: JSON.stringify({ name, color }),
       }),
     ),
   updateTag: async (
     tagId: string,
     input: { name: string; color: TagColor; revision: number },
-    participantId: string,
   ): Promise<Tag> =>
     tagSchema.parse(
       await request(`/_shale/tags/${encodeURIComponent(tagId)}`, {
         method: "PATCH",
-        headers: { "x-shale-participant": participantId },
         body: JSON.stringify(input),
       }),
     ),
+  deleteTag: async (tagId: string): Promise<void> => {
+    await request(`/_shale/tags/${encodeURIComponent(tagId)}`, { method: "DELETE" });
+  },
   updateCardTags: async (
     cardId: string,
     input: { tagIds: string[]; revision: number },
-    participantId: string,
   ): Promise<Card> =>
     cardSchema.parse(
       await request(`/_shale/cards/${encodeURIComponent(cardId)}/tags`, {
         method: "PATCH",
-        headers: { "x-shale-participant": participantId },
+        body: JSON.stringify(input),
+      }),
+    ),
+  updateCardAssignees: async (
+    cardId: string,
+    input: { assigneeIds: string[]; revision: number },
+  ): Promise<Card> =>
+    cardSchema.parse(
+      await request(`/_shale/cards/${encodeURIComponent(cardId)}/assignees`, {
+        method: "PATCH",
         body: JSON.stringify(input),
       }),
     ),
   trash: async () => trashSnapshotSchema.parse(await request("/_shale/trash")),
-  moveToTrash: async (type: TrashItemType, id: string, participantId: string): Promise<void> => {
+  moveToTrash: async (type: TrashItemType, id: string): Promise<void> => {
     await request(`/_shale/trash/${type}/${encodeURIComponent(id)}`, {
       method: "POST",
-      headers: { "x-shale-participant": participantId },
     });
   },
-  restoreFromTrash: async (
-    type: TrashItemType,
-    id: string,
-    participantId: string,
-  ): Promise<void> => {
+  restoreFromTrash: async (type: TrashItemType, id: string): Promise<void> => {
     await request(`/_shale/trash/${type}/${encodeURIComponent(id)}/restore`, {
       method: "POST",
-      headers: { "x-shale-participant": participantId },
     });
   },
-  permanentlyDelete: async (
-    type: TrashItemType,
-    id: string,
-    participantId: string,
-  ): Promise<void> => {
+  permanentlyDelete: async (type: TrashItemType, id: string): Promise<void> => {
     await request(`/_shale/trash/${type}/${encodeURIComponent(id)}`, {
       method: "DELETE",
-      headers: { "x-shale-participant": participantId },
     });
   },
 };

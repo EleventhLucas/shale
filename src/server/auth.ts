@@ -13,9 +13,7 @@ type SessionRow = { expires_at: string };
 type Attempt = { count: number; resetAt: number };
 
 export type AppVariables = {
-  Variables: {
-    participantId: string;
-  };
+  Variables: Record<string, never>;
 };
 
 export function sha256(value: string): string {
@@ -106,21 +104,6 @@ export function createAuth(db: Database, config: AppConfig) {
     await next();
   };
 
-  const requireParticipant: MiddlewareHandler<AppVariables> = async (c, next) => {
-    const participantId = c.req.header("x-shale-participant");
-    if (!participantId) {
-      return c.json({ error: "Select a participant before editing." }, 428);
-    }
-    const participant = db
-      .query("SELECT id FROM participants WHERE id = ? AND active = 1")
-      .get(participantId);
-    if (!participant) {
-      return c.json({ error: "The selected participant is not active." }, 428);
-    }
-    c.set("participantId", participantId);
-    await next();
-  };
-
   return {
     passwordRequired: Boolean(passwordFingerprint),
     passwordMatches: (candidate: string) =>
@@ -128,7 +111,6 @@ export function createAuth(db: Database, config: AppConfig) {
     sessionState,
     issueSession,
     requireSession,
-    requireParticipant,
     throttled,
     recordFailure,
     clearFailures: (key: string) => attempts.delete(key),

@@ -10,14 +10,18 @@ import {
   moveCardInputSchema,
   trashTargetSchema,
   unlockInputSchema,
+  updateCardAssigneesInputSchema,
   updateCardInputSchema,
   updateCardTagsInputSchema,
+  updateParticipantInputSchema,
   updateTagInputSchema,
 } from "../shared/contracts";
 import { type AppVariables, createAuth } from "./auth";
 import type { AppConfig } from "./config";
 import {
   createTag,
+  deleteParticipant,
+  deleteTag,
   getBoard,
   getBootstrap,
   getCard,
@@ -27,7 +31,9 @@ import {
   permanentlyDeleteEntity,
   restoreEntity,
   trashEntity,
+  updateCardAssignees,
   updateCardTags,
+  updateParticipant,
   updateTag,
 } from "./db";
 import { EventHub } from "./events";
@@ -109,6 +115,7 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
         id: randomUUID(),
         displayName,
         active: true,
+        revision: 1,
       };
       const timestamp = new Date().toISOString();
       try {
@@ -124,9 +131,48 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
   );
 
   app.patch(
+    "/_shale/participants/:participantId",
+    auth.requireSession,
+    zValidator("json", updateParticipantInputSchema),
+    (c) => {
+      const input = c.req.valid("json");
+      const result = updateParticipant(
+        db,
+        c.req.param("participantId"),
+        input.displayName,
+        normalizeName(input.displayName),
+        input.revision,
+      );
+      if (result.status === "not_found") return c.json({ error: "Person not found." }, 404);
+      if (result.status === "duplicate") {
+        return c.json({ error: "That display name is already in use." }, 409);
+      }
+      if (result.status === "conflict") {
+        return c.json(
+          { error: "This person changed since you opened Settings.", current: result.participant },
+          409,
+        );
+      }
+      hub.publish({
+        resource: "participants",
+        id: result.participant.id,
+        revision: result.participant.revision,
+      });
+      return c.json(result.participant);
+    },
+  );
+
+  app.delete("/_shale/participants/:participantId", auth.requireSession, (c) => {
+    const participantId = c.req.param("participantId");
+    const result = deleteParticipant(db, participantId);
+    if (result.status === "not_found") return c.json({ error: "Person not found." }, 404);
+    hub.publish({ resource: "participants", id: participantId, revision: 0 });
+    return c.json({ ok: true });
+  });
+
+  app.patch(
     "/_shale/cards/:cardId",
     auth.requireSession,
-    auth.requireParticipant,
     zValidator("json", updateCardInputSchema),
     (c) => {
       const cardId = c.req.param("cardId");
@@ -156,7 +202,6 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
   app.patch(
     "/_shale/cards/:cardId/move",
     auth.requireSession,
-    auth.requireParticipant,
     zValidator("json", moveCardInputSchema),
     (c) => {
       const cardId = c.req.param("cardId");
@@ -186,7 +231,6 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
   app.post(
     "/_shale/boards/:boardId/tags",
     auth.requireSession,
-    auth.requireParticipant,
     zValidator("json", createTagInputSchema),
     (c) => {
       const input = c.req.valid("json");
@@ -203,7 +247,6 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
   app.patch(
     "/_shale/tags/:tagId",
     auth.requireSession,
-    auth.requireParticipant,
     zValidator("json", updateTagInputSchema),
     (c) => {
       const input = c.req.valid("json");
@@ -220,10 +263,16 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
     },
   );
 
+  app.delete("/_shale/tags/:tagId", auth.requireSession, (c) => {
+    const result = deleteTag(db, c.req.param("tagId"));
+    if (result.status === "not_found") return c.json({ error: "Tag not found." }, 404);
+    hub.publish({ resource: "board", id: result.boardId, revision: 0 });
+    return c.json({ ok: true });
+  });
+
   app.patch(
     "/_shale/cards/:cardId/tags",
     auth.requireSession,
-    auth.requireParticipant,
     zValidator("json", updateCardTagsInputSchema),
     (c) => {
       const cardId = c.req.param("cardId");
@@ -244,12 +293,34 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
     },
   );
 
+  app.patch(
+    "/_shale/cards/:cardId/assignees",
+    auth.requireSession,
+    zValidator("json", updateCardAssigneesInputSchema),
+    (c) => {
+      const cardId = c.req.param("cardId");
+      const input = c.req.valid("json");
+      const result = updateCardAssignees(db, cardId, input.assigneeIds, input.revision);
+      if (result.status === "not_found") return c.json({ error: "Card not found." }, 404);
+      if (result.status === "invalid_participant") {
+        return c.json({ error: "Assignees must be active people on this Shale instance." }, 400);
+      }
+      if (result.status === "conflict") {
+        return c.json(
+          { error: "This card changed before its assignees were saved.", current: result.card },
+          409,
+        );
+      }
+      hub.publish({ resource: "card", id: cardId, revision: result.card.revision });
+      return c.json(result.card);
+    },
+  );
+
   app.get("/_shale/trash", auth.requireSession, (c) => c.json({ items: getTrash(db) }));
 
   app.post(
     "/_shale/trash/:type/:id",
     auth.requireSession,
-    auth.requireParticipant,
     zValidator("param", trashTargetSchema),
     (c) => {
       const target = c.req.valid("param");
@@ -263,7 +334,6 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
   app.post(
     "/_shale/trash/:type/:id/restore",
     auth.requireSession,
-    auth.requireParticipant,
     zValidator("param", trashTargetSchema),
     (c) => {
       const target = c.req.valid("param");
@@ -280,7 +350,6 @@ export function createApp(db: Database, config: AppConfig, hub = new EventHub())
   app.delete(
     "/_shale/trash/:type/:id",
     auth.requireSession,
-    auth.requireParticipant,
     zValidator("param", trashTargetSchema),
     (c) => {
       const target = c.req.valid("param");

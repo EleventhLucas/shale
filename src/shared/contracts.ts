@@ -4,8 +4,9 @@ export const idSchema = z.string().min(1).max(100);
 
 export const participantSchema = z.object({
   id: idSchema,
-  displayName: z.string(),
+  displayName: z.string().trim().min(1).max(80),
   active: z.boolean(),
+  revision: z.number().int().positive(),
 });
 
 export const defaultTagColor = "#6b6b68";
@@ -81,6 +82,11 @@ export const createParticipantInputSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
 });
 
+export const updateParticipantInputSchema = z.object({
+  displayName: z.string().trim().min(1).max(80),
+  revision: z.number().int().positive(),
+});
+
 export const updateCardInputSchema = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().max(50_000),
@@ -107,6 +113,14 @@ export const updateTagInputSchema = z.object({
 
 export const updateCardTagsInputSchema = z.object({
   tagIds: z
+    .array(idSchema)
+    .max(50)
+    .refine((ids) => new Set(ids).size === ids.length),
+  revision: z.number().int().positive(),
+});
+
+export const updateCardAssigneesInputSchema = z.object({
+  assigneeIds: z
     .array(idSchema)
     .max(50)
     .refine((ids) => new Set(ids).size === ids.length),

@@ -3,16 +3,24 @@ import {
   createParticipantInputSchema,
   createTagInputSchema,
   moveCardInputSchema,
+  updateCardAssigneesInputSchema,
   updateCardInputSchema,
+  updateParticipantInputSchema,
   updateTagInputSchema,
 } from "../../src/shared/contracts";
 
 describe("shared input contracts", () => {
-  it("trims participant names and rejects empty attribution", () => {
+  it("trims person names and rejects empty names", () => {
     expect(createParticipantInputSchema.parse({ displayName: "  Avery  " })).toEqual({
       displayName: "Avery",
     });
     expect(() => createParticipantInputSchema.parse({ displayName: "   " })).toThrow();
+    expect(
+      updateParticipantInputSchema.parse({ displayName: "  Avery T.  ", revision: 2 }),
+    ).toEqual({
+      displayName: "Avery T.",
+      revision: 2,
+    });
   });
 
   it("requires a revision and explicit non-empty card title", () => {
@@ -41,6 +49,21 @@ describe("shared input contracts", () => {
         targetColumnId: "column-done",
         targetPosition: -1,
         revision: 3,
+      }),
+    ).toThrow();
+  });
+
+  it("requires unique person assignments", () => {
+    expect(
+      updateCardAssigneesInputSchema.parse({
+        assigneeIds: ["person-a", "person-b"],
+        revision: 4,
+      }),
+    ).toEqual({ assigneeIds: ["person-a", "person-b"], revision: 4 });
+    expect(() =>
+      updateCardAssigneesInputSchema.parse({
+        assigneeIds: ["person-a", "person-a"],
+        revision: 4,
       }),
     ).toThrow();
   });

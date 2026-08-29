@@ -159,10 +159,6 @@ export function App() {
       setUnlockOpen(true);
       return false;
     }
-    if (!activeParticipant) {
-      setIdentityOpen(true);
-      return false;
-    }
     return true;
   }
 
@@ -218,7 +214,6 @@ export function App() {
           onClose={() => setUnlockOpen(false)}
           onUnlocked={() => {
             setUnlockOpen(false);
-            if (!activeParticipant) setIdentityOpen(true);
           }}
         />
       )}
@@ -281,12 +276,11 @@ function BoardPage({
     { previous?: BoardSnapshot }
   >({
     mutationFn: ({ card, targetColumnId, targetPosition }) => {
-      if (!participant) throw new Error("Select a participant before moving cards.");
-      return api.moveCard(
-        card.id,
-        { targetColumnId, targetPosition, revision: card.revision },
-        participant.id,
-      );
+      return api.moveCard(card.id, {
+        targetColumnId,
+        targetPosition,
+        revision: card.revision,
+      });
     },
     onMutate: async ({ card, targetColumnId, targetPosition }) => {
       setMoveError(undefined);
@@ -313,6 +307,7 @@ function BoardPage({
   const activeCard = board.data?.columns
     .flatMap((column) => column.cards)
     .find((card) => card.id === activeCardId);
+  const people = bootstrap.data?.participants.filter((person) => person.active) ?? [];
   const query = search.trim().toLocaleLowerCase();
 
   function requestMove(card: Card, targetColumnId: string, targetPosition: number): void {
@@ -400,11 +395,9 @@ function BoardPage({
           </button>
           <button
             type="button"
-            aria-label="Open board settings"
-            title="Board settings"
-            onClick={() => {
-              if (requestEditing()) setSettingsOpen(true);
-            }}
+            aria-label="Open settings"
+            title="Settings"
+            onClick={() => setSettingsOpen(true)}
           >
             <Settings size={17} />
           </button>
@@ -427,18 +420,10 @@ function BoardPage({
             <strong>{board.data.board.name}</strong>
           </div>
           <div className="topbar-actions">
-            <Button
-              variant="quiet"
-              size="icon"
-              aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            >
-              {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-            </Button>
             {session.data?.unlocked ? (
               <>
                 <Button variant="quiet" size="small" onClick={openIdentity}>
-                  <CircleUserRound size={16} /> {participant?.displayName ?? "Choose name"}
+                  <CircleUserRound size={16} /> {participant?.displayName ?? "Choose person"}
                 </Button>
                 {session.data.passwordRequired ? (
                   <Button variant="quiet" size="small" onClick={() => lock.mutate()}>
@@ -486,6 +471,7 @@ function BoardPage({
               <BoardColumn
                 key={column.id}
                 column={column}
+                people={people}
                 query={query}
                 onOpen={(card) =>
                   navigate(`/w/${workspaceSlug}/b/${boardSlug}/c/${encodeURIComponent(card.id)}`)
@@ -494,7 +480,7 @@ function BoardPage({
             ))}
           </section>
           <DragOverlay dropAnimation={null}>
-            {activeCard ? <CardPreview card={activeCard} /> : null}
+            {activeCard ? <CardPreview card={activeCard} people={people} /> : null}
           </DragOverlay>
         </DndContext>
       </main>
@@ -505,25 +491,29 @@ function BoardPage({
           card={selectedCard}
           boardKey={["board", workspaceSlug, boardSlug]}
           tags={board.data.tags}
+          people={people}
           participant={participant}
           requestEditing={requestEditing}
+          openIdentity={openIdentity}
           onClose={() => navigate(`/w/${workspaceSlug}/b/${boardSlug}`)}
           onTrashed={() => navigate(`/w/${workspaceSlug}/b/${boardSlug}`)}
         />
       )}
       {settingsOpen && (
-        <BoardSettingsDialog
+        <SettingsDialog
           tags={board.data.tags}
           boardId={board.data.board.id}
           boardKey={["board", workspaceSlug, boardSlug]}
-          participant={participant}
+          people={people}
+          requestEditing={requestEditing}
+          theme={theme}
+          setTheme={setTheme}
           onClose={() => setSettingsOpen(false)}
         />
       )}
       {trashOpen && (
         <TrashDialog
           boardKey={["board", workspaceSlug, boardSlug]}
-          participant={participant}
           onClose={() => setTrashOpen(false)}
         />
       )}
@@ -573,10 +563,12 @@ function moveCardInSnapshot(
 
 function BoardColumn({
   column,
+  people,
   query,
   onOpen,
 }: {
   column: Column;
+  people: Participant[];
   query: string;
   onOpen: (card: Card) => void;
 }) {
@@ -600,7 +592,12 @@ function BoardColumn({
       <SortableContext items={cards.map((card) => card.id)} strategy={verticalListSortingStrategy}>
         <div className="card-list">
           {cards.map((card) => (
-            <SortableCardTile key={card.id} card={card} onOpen={() => onOpen(card)} />
+            <SortableCardTile
+              key={card.id}
+              card={card}
+              people={people}
+              onOpen={() => onOpen(card)}
+            />
           ))}
           {cards.length === 0 && <div className="column-empty">No matching cards</div>}
         </div>
@@ -609,7 +606,15 @@ function BoardColumn({
   );
 }
 
-function SortableCardTile({ card, onOpen }: { card: Card; onOpen: () => void }) {
+function SortableCardTile({
+  card,
+  people,
+  onOpen,
+}: {
+  card: Card;
+  people: Participant[];
+  onOpen: () => void;
+}) {
   const { attributes, isDragging, listeners, setNodeRef, transform } = useSortable({
     id: card.id,
     data: { type: "card", columnId: card.columnId },
@@ -626,13 +631,16 @@ function SortableCardTile({ card, onOpen }: { card: Card; onOpen: () => void }) 
       aria-label={`${card.title}. Press Space to pick up and move this card.`}
     >
       <button className="card-open" type="button" onClick={onOpen}>
-        <CardContent card={card} />
+        <CardContent card={card} people={people} />
       </button>
     </article>
   );
 }
 
-function CardContent({ card }: { card: Card }) {
+function CardContent({ card, people }: { card: Card; people: Participant[] }) {
+  const assignees = card.assigneeIds
+    .map((id) => people.find((person) => person.id === id))
+    .filter((person): person is Participant => Boolean(person));
   return (
     <>
       <div className="tag-row">
@@ -643,14 +651,24 @@ function CardContent({ card }: { card: Card }) {
         ))}
       </div>
       <h3>{card.title}</h3>
+      {assignees.length > 0 && (
+        <div className="card-assignees">
+          {assignees.map((person) => (
+            <span className="card-assignee" title={person.displayName} key={person.id}>
+              {person.displayName.slice(0, 1).toUpperCase()}
+              <span>{person.displayName}</span>
+            </span>
+          ))}
+        </div>
+      )}
     </>
   );
 }
 
-function CardPreview({ card }: { card: Card }) {
+function CardPreview({ card, people }: { card: Card; people: Participant[] }) {
   return (
     <div className="card-preview">
-      <CardContent card={card} />
+      <CardContent card={card} people={people} />
     </div>
   );
 }
@@ -659,16 +677,20 @@ function CardDrawer({
   card,
   boardKey,
   tags,
+  people,
   participant,
   requestEditing,
+  openIdentity,
   onClose,
   onTrashed,
 }: {
   card?: Card;
   boardKey: string[];
   tags: Tag[];
+  people: Participant[];
   participant?: Participant;
   requestEditing: () => boolean;
+  openIdentity: () => void;
   onClose: () => void;
   onTrashed: () => void;
 }) {
@@ -687,12 +709,8 @@ function CardDrawer({
 
   const save = useMutation<Card, Error, boolean>({
     mutationFn: (force = false) => {
-      if (!card || !participant) throw new Error("Select a participant before editing.");
-      return api.updateCard(
-        card.id,
-        { title, description, revision: card.revision, force },
-        participant.id,
-      );
+      if (!card) throw new Error("Card not found.");
+      return api.updateCard(card.id, { title, description, revision: card.revision, force });
     },
     onSuccess: () => {
       setConflict(undefined);
@@ -708,8 +726,8 @@ function CardDrawer({
   });
   const trashCard = useMutation({
     mutationFn: () => {
-      if (!card || !participant) throw new Error("Select a participant before editing.");
-      return api.moveToTrash("card", card.id, participant.id);
+      if (!card) throw new Error("Card not found.");
+      return api.moveToTrash("card", card.id);
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: boardKey });
@@ -810,8 +828,15 @@ function CardDrawer({
               card={card}
               tags={tags}
               boardKey={boardKey}
-              participant={participant}
               requestEditing={requestEditing}
+            />
+            <CardAssigneePicker
+              card={card}
+              people={people}
+              participant={participant}
+              boardKey={boardKey}
+              requestEditing={requestEditing}
+              openIdentity={openIdentity}
             />
             <section className="detail-section">
               <h3>Description</h3>
@@ -892,13 +917,11 @@ function CardTagPicker({
   card,
   tags,
   boardKey,
-  participant,
   requestEditing,
 }: {
   card: Card;
   tags: Tag[];
   boardKey: string[];
-  participant?: Participant;
   requestEditing: () => boolean;
 }) {
   const queryClient = useQueryClient();
@@ -906,10 +929,8 @@ function CardTagPicker({
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: boardKey });
   const assign = useMutation({
-    mutationFn: (tagIds: string[]) => {
-      if (!participant) throw new Error("Select a participant before editing tags.");
-      return api.updateCardTags(card.id, { tagIds, revision: card.revision }, participant.id);
-    },
+    mutationFn: (tagIds: string[]) =>
+      api.updateCardTags(card.id, { tagIds, revision: card.revision }),
     onSuccess: refresh,
   });
   const assigned = new Set(card.tags.map((tag) => tag.id));
@@ -987,15 +1008,129 @@ function CardTagPicker({
   );
 }
 
-function TagManagerRow({
-  tag,
-  boardKey,
+function CardAssigneePicker({
+  card,
+  people,
   participant,
+  boardKey,
+  requestEditing,
+  openIdentity,
 }: {
-  tag: Tag;
-  boardKey: string[];
+  card: Card;
+  people: Participant[];
   participant?: Participant;
+  boardKey: string[];
+  requestEditing: () => boolean;
+  openIdentity: () => void;
 }) {
+  const queryClient = useQueryClient();
+  const [query, setQuery] = useState("");
+  const refresh = () => queryClient.invalidateQueries({ queryKey: boardKey });
+  const assign = useMutation({
+    mutationFn: (assigneeIds: string[]) =>
+      api.updateCardAssignees(card.id, { assigneeIds, revision: card.revision }),
+    onSuccess: refresh,
+  });
+  const assigned = new Set(card.assigneeIds);
+  const assignedPeople = card.assigneeIds
+    .map((id) => people.find((person) => person.id === id))
+    .filter((person): person is Participant => Boolean(person));
+  const available = people.filter(
+    (person) =>
+      !assigned.has(person.id) &&
+      person.displayName.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+  );
+
+  function updateAssignees(assigneeIds: string[]): void {
+    if (!requestEditing()) return;
+    assign.mutate(assigneeIds);
+  }
+
+  function assignToMe(): void {
+    if (!participant) {
+      openIdentity();
+      return;
+    }
+    if (!assigned.has(participant.id)) {
+      updateAssignees([...card.assigneeIds, participant.id]);
+    }
+  }
+
+  return (
+    <section className="assignee-section">
+      <h3>People</h3>
+      <div className="drawer-assignees">
+        {assignedPeople.map((person) => (
+          <span className="person-badge person-badge--removable" key={person.id}>
+            <i aria-hidden="true">{person.displayName.slice(0, 1).toUpperCase()}</i>
+            {person.displayName}
+            <button
+              type="button"
+              aria-label={`Unassign ${person.displayName}`}
+              disabled={assign.isPending}
+              onClick={() =>
+                updateAssignees(card.assigneeIds.filter((personId) => personId !== person.id))
+              }
+            >
+              <X size={11} />
+            </button>
+          </span>
+        ))}
+        <Button
+          variant="quiet"
+          size="small"
+          type="button"
+          disabled={assign.isPending || Boolean(participant && assigned.has(participant.id))}
+          onClick={assignToMe}
+        >
+          <CircleUserRound size={14} /> Assign to me
+        </Button>
+        <details className="tag-picker">
+          <summary>
+            <Plus size={13} /> Add person
+          </summary>
+          <div className="tag-picker-menu">
+            <input
+              value={query}
+              placeholder="Search people"
+              aria-label="Search available people"
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.preventDefault();
+              }}
+            />
+            <div className="tag-picker-options">
+              {available.map((person) => (
+                <button
+                  type="button"
+                  key={person.id}
+                  disabled={assign.isPending}
+                  onClick={(event) => {
+                    updateAssignees([...card.assigneeIds, person.id]);
+                    setQuery("");
+                    const details = event.currentTarget.closest("details");
+                    if (details) details.open = false;
+                  }}
+                >
+                  <i className="person-dot" aria-hidden="true">
+                    {person.displayName.slice(0, 1).toUpperCase()}
+                  </i>
+                  {person.displayName}
+                </button>
+              ))}
+              {available.length === 0 && (
+                <span className="tag-picker-empty">No matching people</span>
+              )}
+            </div>
+          </div>
+        </details>
+      </div>
+      {assign.error && <p className="form-error">{assign.error.message}</p>}
+    </section>
+  );
+}
+
+function TagManagerRow({ tag, boardKey }: { tag: Tag; boardKey: string[] }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState(tag.name);
   const [color, setColor] = useState<TagColor>(tag.color);
@@ -1012,8 +1147,7 @@ function TagManagerRow({
       revision: number;
       signature: string;
     }) => {
-      if (!participant) throw new Error("Select a participant before changing tags.");
-      return api.updateTag(tag.id, { name: nextName, color: nextColor, revision }, participant.id);
+      return api.updateTag(tag.id, { name: nextName, color: nextColor, revision });
     },
     onSuccess: async () => {
       setFailedSignature(undefined);
@@ -1025,6 +1159,10 @@ function TagManagerRow({
     },
   });
   const { isPending, mutate, reset } = update;
+  const remove = useMutation({
+    mutationFn: () => api.deleteTag(tag.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: boardKey }),
+  });
 
   useEffect(() => {
     const previous = previousTag.current;
@@ -1078,85 +1216,285 @@ function TagManagerRow({
           setColor(nextColor);
         }}
       />
+      <Button
+        variant="quiet"
+        size="icon"
+        type="button"
+        aria-label={`Delete ${tag.name}`}
+        title={`Delete ${tag.name}`}
+        disabled={remove.isPending}
+        onClick={() => remove.mutate()}
+      >
+        <Trash2 size={15} />
+      </Button>
     </div>
   );
 }
 
-function BoardSettingsDialog({
+function PersonManagerRow({ person, boardKey }: { person: Participant; boardKey: string[] }) {
+  const queryClient = useQueryClient();
+  const [displayName, setDisplayName] = useState(person.displayName);
+  const [failedSignature, setFailedSignature] = useState<string>();
+  const previousPerson = useRef(person);
+  const update = useMutation({
+    mutationFn: ({ name, revision }: { name: string; revision: number; signature: string }) =>
+      api.updateParticipant(person.id, { displayName: name, revision }),
+    onSuccess: async () => {
+      setFailedSignature(undefined);
+      await queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+    },
+    onError: async (_error, variables) => {
+      setFailedSignature(variables.signature);
+      await queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+    },
+  });
+  const { isPending, mutate, reset } = update;
+  const remove = useMutation({
+    mutationFn: () => api.deleteParticipant(person.id),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["bootstrap"] }),
+        queryClient.invalidateQueries({ queryKey: boardKey }),
+      ]);
+    },
+  });
+
+  useEffect(() => {
+    const previous = previousPerson.current;
+    setDisplayName((current) =>
+      current.trim() === previous.displayName ? person.displayName : current,
+    );
+    previousPerson.current = person;
+  }, [person]);
+
+  const persist = useCallback(() => {
+    const name = displayName.trim();
+    const signature = `${name}\u0000${person.revision}`;
+    if (!name || isPending || name === person.displayName || failedSignature === signature) {
+      return;
+    }
+    mutate({ name, revision: person.revision, signature });
+  }, [displayName, failedSignature, isPending, mutate, person]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(persist, 400);
+    return () => window.clearTimeout(timeout);
+  }, [persist]);
+
+  return (
+    <div className="person-manager-row">
+      <input
+        className="tag-name-input"
+        value={displayName}
+        maxLength={80}
+        aria-label={`Rename ${person.displayName}`}
+        onBlur={persist}
+        onChange={(event) => {
+          if (!isPending) reset();
+          setFailedSignature(undefined);
+          setDisplayName(event.target.value);
+        }}
+      />
+      <Button
+        variant="quiet"
+        size="icon"
+        type="button"
+        aria-label={`Delete ${person.displayName}`}
+        title={`Delete ${person.displayName}`}
+        disabled={remove.isPending}
+        onClick={() => remove.mutate()}
+      >
+        <Trash2 size={15} />
+      </Button>
+    </div>
+  );
+}
+
+function SettingsDialog({
   tags,
+  people,
   boardId,
   boardKey,
-  participant,
+  requestEditing,
+  theme,
+  setTheme,
   onClose,
 }: {
   tags: Tag[];
+  people: Participant[];
   boardId: string;
   boardKey: string[];
-  participant?: Participant;
+  requestEditing: () => boolean;
+  theme: "light" | "dark";
+  setTheme: (value: "light" | "dark") => void;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [section, setSection] = useState<"appearance" | "tags" | "people">("appearance");
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState<TagColor>(defaultTagColor);
+  const [newPersonName, setNewPersonName] = useState("");
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: boardKey });
   const create = useMutation({
-    mutationFn: ({ name, color }: { name: string; color: TagColor }) => {
-      if (!participant) throw new Error("Select a participant before creating tags.");
-      return api.createTag(boardId, name, color, participant.id);
-    },
+    mutationFn: ({ name, color }: { name: string; color: TagColor }) =>
+      api.createTag(boardId, name, color),
     onSuccess: () => {
       setNewName("");
       setNewColor(defaultTagColor);
       void refresh();
     },
   });
+  const createPerson = useMutation({
+    mutationFn: api.createParticipant,
+    onSuccess: () => {
+      setNewPersonName("");
+      void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+    },
+  });
 
   return (
-    <Dialog title="Board settings" onClose={onClose}>
-      <section className="settings-section">
-        <h3>Tags</h3>
-        <p className="dialog-copy">Edit the tags available across this board.</p>
-        <div className="tag-manager-list">
-          {tags.map((tag) => (
-            <TagManagerRow tag={tag} boardKey={boardKey} participant={participant} key={tag.id} />
-          ))}
-        </div>
-        <form
-          className="tag-create-row"
-          onSubmit={(event) => {
-            event.preventDefault();
-            create.mutate({ name: newName.trim(), color: newColor });
+    <Dialog title="Settings" onClose={onClose}>
+      <div className="settings-tabs" role="tablist" aria-label="Settings categories">
+        <button
+          id="settings-appearance-tab"
+          className={
+            section === "appearance" ? "settings-tab settings-tab--active" : "settings-tab"
+          }
+          type="button"
+          role="tab"
+          aria-selected={section === "appearance"}
+          aria-controls="settings-appearance-panel"
+          onClick={() => setSection("appearance")}
+        >
+          Appearance
+        </button>
+        <button
+          id="settings-tags-tab"
+          className={section === "tags" ? "settings-tab settings-tab--active" : "settings-tab"}
+          type="button"
+          role="tab"
+          aria-selected={section === "tags"}
+          aria-controls="settings-tags-panel"
+          onClick={() => {
+            if (requestEditing()) setSection("tags");
           }}
         >
-          <input
-            className="tag-name-input"
-            value={newName}
-            maxLength={40}
-            placeholder="New tag"
-            aria-label="New tag name"
-            onChange={(event) => setNewName(event.target.value)}
-          />
-          <TagColorField color={newColor} label="New tag color" onChange={setNewColor} />
-          <Button size="small" type="submit" disabled={!newName.trim() || create.isPending}>
-            Add tag
+          Tags
+        </button>
+        <button
+          id="settings-people-tab"
+          className={section === "people" ? "settings-tab settings-tab--active" : "settings-tab"}
+          type="button"
+          role="tab"
+          aria-selected={section === "people"}
+          aria-controls="settings-people-panel"
+          onClick={() => {
+            if (requestEditing()) setSection("people");
+          }}
+        >
+          Persons
+        </button>
+      </div>
+
+      {section === "appearance" ? (
+        <section
+          className="settings-section settings-panel"
+          id="settings-appearance-panel"
+          role="tabpanel"
+          aria-labelledby="settings-appearance-tab"
+        >
+          <h3>Theme</h3>
+          <Button
+            className="theme-toggle"
+            variant="quiet"
+            type="button"
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          >
+            {theme === "dark" ? <Moon size={17} /> : <Sun size={17} />}
+            <span>{theme === "dark" ? "Dark mode" : "Light mode"}</span>
           </Button>
-        </form>
-        {create.error && <p className="form-error">{create.error.message}</p>}
-      </section>
+        </section>
+      ) : section === "tags" ? (
+        <section
+          className="settings-section settings-panel"
+          id="settings-tags-panel"
+          role="tabpanel"
+          aria-labelledby="settings-tags-tab"
+        >
+          <p className="dialog-copy">Edit the tags available across this board.</p>
+          <div className="tag-manager-list">
+            {tags.map((tag) => (
+              <TagManagerRow tag={tag} boardKey={boardKey} key={tag.id} />
+            ))}
+          </div>
+          <form
+            className="tag-create-row"
+            onSubmit={(event) => {
+              event.preventDefault();
+              create.mutate({ name: newName.trim(), color: newColor });
+            }}
+          >
+            <input
+              className="tag-name-input"
+              value={newName}
+              maxLength={40}
+              placeholder="New tag"
+              aria-label="New tag name"
+              onChange={(event) => setNewName(event.target.value)}
+            />
+            <TagColorField color={newColor} label="New tag color" onChange={setNewColor} />
+            <Button size="small" type="submit" disabled={!newName.trim() || create.isPending}>
+              Add tag
+            </Button>
+          </form>
+          {create.error && <p className="form-error">{create.error.message}</p>}
+        </section>
+      ) : (
+        <section
+          className="settings-section settings-panel"
+          id="settings-people-panel"
+          role="tabpanel"
+          aria-labelledby="settings-people-tab"
+        >
+          <p className="dialog-copy">Manage the people available for card assignments.</p>
+          <div className="person-manager-list">
+            {people.map((person) => (
+              <PersonManagerRow person={person} boardKey={boardKey} key={person.id} />
+            ))}
+          </div>
+          <form
+            className="person-create-row"
+            onSubmit={(event) => {
+              event.preventDefault();
+              createPerson.mutate(newPersonName.trim());
+            }}
+          >
+            <input
+              className="tag-name-input"
+              value={newPersonName}
+              maxLength={80}
+              placeholder="New person"
+              aria-label="New person name"
+              onChange={(event) => setNewPersonName(event.target.value)}
+            />
+            <Button
+              size="small"
+              type="submit"
+              disabled={!newPersonName.trim() || createPerson.isPending}
+            >
+              Add person
+            </Button>
+          </form>
+          {createPerson.error && <p className="form-error">{createPerson.error.message}</p>}
+        </section>
+      )}
     </Dialog>
   );
 }
 
-function TrashDialog({
-  boardKey,
-  participant,
-  onClose,
-}: {
-  boardKey: string[];
-  participant?: Participant;
-  onClose: () => void;
-}) {
+function TrashDialog({ boardKey, onClose }: { boardKey: string[]; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState<string>();
   const trash = useQuery({ queryKey: ["trash"], queryFn: api.trash });
@@ -1166,17 +1504,11 @@ function TrashDialog({
     void queryClient.invalidateQueries({ queryKey: boardKey });
   };
   const restore = useMutation({
-    mutationFn: (item: TrashItem) => {
-      if (!participant) throw new Error("Select a participant before restoring items.");
-      return api.restoreFromTrash(item.type, item.id, participant.id);
-    },
+    mutationFn: (item: TrashItem) => api.restoreFromTrash(item.type, item.id),
     onSuccess: refresh,
   });
   const purge = useMutation({
-    mutationFn: (item: TrashItem) => {
-      if (!participant) throw new Error("Select a participant before deleting items.");
-      return api.permanentlyDelete(item.type, item.id, participant.id);
-    },
+    mutationFn: (item: TrashItem) => api.permanentlyDelete(item.type, item.id),
     onSuccess: () => {
       setConfirming(undefined);
       refresh();
@@ -1329,9 +1661,10 @@ function IdentityDialog({
     },
   });
   return (
-    <Dialog title="Who are you editing as?" onClose={onClose}>
+    <Dialog title="Choose yourself" onClose={onClose}>
       <p className="dialog-copy">
-        Display names are attribution, not accounts. Every unlocked editor has the same access.
+        This is optional and only powers shortcuts such as Assign to me. It does not change edit
+        access.
       </p>
       {participants.length > 0 && (
         <div className="participant-list">
@@ -1350,7 +1683,7 @@ function IdentityDialog({
         }}
       >
         <label className="field-label" htmlFor="display-name">
-          {participants.length ? "Or add a display name" : "Create a display name"}
+          {participants.length ? "Or add a person" : "Add a person"}
         </label>
         <input
           className="text-input"

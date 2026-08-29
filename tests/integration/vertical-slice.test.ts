@@ -26,6 +26,13 @@ describe("Shale vertical slice", () => {
     const publicRead = await app.request("/_shale/boards/sample-workspace/sample-board");
     expect(publicRead.status).toBe(200);
 
+    const lockedMutation = await app.request("/_shale/cards/card-welcome", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ title: "Still locked", description: "Updated", revision: 1 }),
+    });
+    expect(lockedMutation.status).toBe(401);
+
     const unlock = await app.request("/_shale/session/unlock", {
       method: "POST",
       headers: { "content-type": "application/json", origin },
@@ -35,21 +42,12 @@ describe("Shale vertical slice", () => {
     const cookie = unlock.headers.get("set-cookie")?.split(";")[0];
     expect(cookie).toBeTruthy();
 
-    const participantResponse = await app.request("/_shale/participants", {
-      method: "POST",
-      headers: { "content-type": "application/json", origin, cookie: cookie as string },
-      body: JSON.stringify({ displayName: "Test Editor" }),
-    });
-    expect(participantResponse.status).toBe(201);
-    const participant = (await participantResponse.json()) as { id: string };
-
     const updated = await app.request("/_shale/cards/card-welcome", {
       method: "PATCH",
       headers: {
         "content-type": "application/json",
         origin,
         cookie: cookie as string,
-        "x-shale-participant": participant.id,
       },
       body: JSON.stringify({ title: "Saved once", description: "Updated", revision: 1 }),
     });
@@ -61,7 +59,6 @@ describe("Shale vertical slice", () => {
         "content-type": "application/json",
         origin,
         cookie: cookie as string,
-        "x-shale-participant": participant.id,
       },
       body: JSON.stringify({ title: "Stale save", description: "Updated", revision: 1 }),
     });
@@ -74,7 +71,6 @@ describe("Shale vertical slice", () => {
         "content-type": "application/json",
         origin,
         cookie: cookie as string,
-        "x-shale-participant": participant.id,
       },
       body: JSON.stringify({
         targetColumnId: "sandbox-done",
@@ -101,7 +97,6 @@ describe("Shale vertical slice", () => {
         "content-type": "application/json",
         origin,
         cookie: cookie as string,
-        "x-shale-participant": participant.id,
       },
       body: JSON.stringify({
         targetColumnId: "sandbox-done",
@@ -125,7 +120,7 @@ describe("Shale vertical slice", () => {
     ]);
   });
 
-  it("allows attributed mutations without a session when passwordless", async () => {
+  it("allows high-trust editing and manages tags, people, and assignments", async () => {
     db.query("UPDATE tags SET color = 'blue' WHERE id = 'tag-collaboration'").run();
     const app = createApp(db, {
       port: 3000,
@@ -145,7 +140,7 @@ describe("Shale vertical slice", () => {
       headers: { "content-type": "application/json", origin },
       body: JSON.stringify({ displayName: "Public Editor" }),
     });
-    const participant = (await participantResponse.json()) as { id: string };
+    const participant = (await participantResponse.json()) as { id: string; revision: number };
     expect(participantResponse.status).toBe(201);
 
     const moved = await app.request("/_shale/cards/card-live/move", {
@@ -153,7 +148,6 @@ describe("Shale vertical slice", () => {
       headers: {
         "content-type": "application/json",
         origin,
-        "x-shale-participant": participant.id,
       },
       body: JSON.stringify({
         targetColumnId: "sandbox-done",
@@ -169,7 +163,6 @@ describe("Shale vertical slice", () => {
       headers: {
         "content-type": "application/json",
         origin,
-        "x-shale-participant": participant.id,
       },
       body: JSON.stringify({ name: "Needs review" }),
     });
@@ -182,7 +175,6 @@ describe("Shale vertical slice", () => {
       headers: {
         "content-type": "application/json",
         origin,
-        "x-shale-participant": participant.id,
       },
       body: JSON.stringify({
         tagIds: ["tag-collaboration", tag.id],
@@ -190,19 +182,33 @@ describe("Shale vertical slice", () => {
       }),
     });
     expect(tagged.status).toBe(200);
-    expect(await tagged.json()).toMatchObject({
+    const taggedCard = (await tagged.json()) as {
+      revision: number;
+      tags: Array<{ name: string; color: string }>;
+    };
+    expect(taggedCard).toMatchObject({
       tags: [
         { name: "Collaboration", color: "#4f78b8" },
         { name: "Needs review", color: "#6b6b68" },
       ],
     });
 
+    const assigned = await app.request("/_shale/cards/card-live/assignees", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({
+        assigneeIds: [participant.id],
+        revision: taggedCard.revision,
+      }),
+    });
+    expect(assigned.status).toBe(200);
+    expect(await assigned.json()).toMatchObject({ assigneeIds: [participant.id] });
+
     const renamed = await app.request(`/_shale/tags/${tag.id}`, {
       method: "PATCH",
       headers: {
         "content-type": "application/json",
         origin,
-        "x-shale-participant": participant.id,
       },
       body: JSON.stringify({
         name: "Ready for review",
@@ -211,6 +217,14 @@ describe("Shale vertical slice", () => {
       }),
     });
     expect(renamed.status).toBe(200);
+
+    const renamedPerson = await app.request(`/_shale/participants/${participant.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ displayName: "Board Visitor", revision: participant.revision }),
+    });
+    expect(renamedPerson.status).toBe(200);
+    expect(await renamedPerson.json()).toMatchObject({ displayName: "Board Visitor", revision: 2 });
 
     const snapshot = (await (
       await app.request("/_shale/boards/sample-workspace/sample-board")
@@ -231,6 +245,29 @@ describe("Shale vertical slice", () => {
     expect(liveCard).not.toHaveProperty("dueDate");
     expect(liveCard).not.toHaveProperty("checklist");
     expect(liveCard).not.toHaveProperty("labels");
+
+    const deletedTag = await app.request(`/_shale/tags/${tag.id}`, {
+      method: "DELETE",
+      headers: { origin },
+    });
+    expect(deletedTag.status).toBe(200);
+    const deletedPerson = await app.request(`/_shale/participants/${participant.id}`, {
+      method: "DELETE",
+      headers: { origin },
+    });
+    expect(deletedPerson.status).toBe(200);
+
+    const afterDeletes = (await (
+      await app.request("/_shale/boards/sample-workspace/sample-board")
+    ).json()) as {
+      tags: Array<{ id: string }>;
+      columns: Array<{ cards: Array<{ id: string; assigneeIds: string[] }> }>;
+    };
+    expect(afterDeletes.tags.some((item) => item.id === tag.id)).toBe(false);
+    expect(
+      afterDeletes.columns.flatMap((column) => column.cards).find((card) => card.id === "card-live")
+        ?.assigneeIds,
+    ).toEqual([]);
   });
 
   it("restores and permanently deletes items through the recoverable trash", async () => {
@@ -240,16 +277,7 @@ describe("Shale vertical slice", () => {
       publicOrigin: origin,
       sessionDays: 30,
     });
-    const participantResponse = await app.request("/_shale/participants", {
-      method: "POST",
-      headers: { "content-type": "application/json", origin },
-      body: JSON.stringify({ displayName: "Trash Editor" }),
-    });
-    const participant = (await participantResponse.json()) as { id: string };
-    const mutationHeaders = {
-      origin,
-      "x-shale-participant": participant.id,
-    };
+    const mutationHeaders = { origin };
 
     const initialTrash = (await (await app.request("/_shale/trash")).json()) as {
       items: Array<{ id: string; type: string }>;

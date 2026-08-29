@@ -189,14 +189,79 @@ export function getParticipants(db: Database): Participant[] {
   return asRows(
     db
       .query(
-        "SELECT id, display_name, active FROM participants ORDER BY display_name COLLATE NOCASE",
+        "SELECT id, display_name, active, revision FROM participants ORDER BY display_name COLLATE NOCASE",
       )
       .all(),
   ).map((row) => ({
     id: String(row.id),
     displayName: String(row.display_name),
     active: Boolean(row.active),
+    revision: Number(row.revision),
   }));
+}
+
+export type UpdateParticipantResult =
+  | { status: "ok"; participant: Participant }
+  | { status: "conflict"; participant: Participant }
+  | { status: "not_found" }
+  | { status: "duplicate" };
+
+export function updateParticipant(
+  db: Database,
+  participantId: string,
+  displayName: string,
+  normalizedName: string,
+  revision: number,
+): UpdateParticipantResult {
+  const row = db
+    .query("SELECT id, display_name, active, revision FROM participants WHERE id = ?")
+    .get(participantId) as Row | null;
+  if (!row) return { status: "not_found" };
+  const current = {
+    id: String(row.id),
+    displayName: String(row.display_name),
+    active: Boolean(row.active),
+    revision: Number(row.revision),
+  };
+  if (current.revision !== revision) return { status: "conflict", participant: current };
+  try {
+    const result = db
+      .query(
+        `UPDATE participants
+        SET display_name = ?, normalized_name = ?, revision = revision + 1, updated_at = ?
+        WHERE id = ? AND revision = ?`,
+      )
+      .run(displayName, normalizedName, now(), participantId, revision);
+    if (result.changes === 0) return { status: "conflict", participant: current };
+  } catch {
+    return { status: "duplicate" };
+  }
+  return {
+    status: "ok",
+    participant: { ...current, displayName, revision: revision + 1 },
+  };
+}
+
+export function deleteParticipant(
+  db: Database,
+  participantId: string,
+): { status: "ok" } | { status: "not_found" } {
+  return db.transaction(() => {
+    if (!db.query("SELECT id FROM participants WHERE id = ?").get(participantId)) {
+      return { status: "not_found" as const };
+    }
+    db.query(
+      `UPDATE cards
+      SET revision = revision + 1, updated_at = ?
+      WHERE id IN (SELECT card_id FROM card_assignees WHERE participant_id = ?)`,
+    ).run(now(), participantId);
+    db.query("DELETE FROM card_assignees WHERE participant_id = ?").run(participantId);
+    db.query(
+      "UPDATE comments SET author_participant_id = NULL WHERE author_participant_id = ?",
+    ).run(participantId);
+    db.query("DELETE FROM participants WHERE id = ?").run(participantId);
+    return { status: "ok" as const };
+  })();
 }
 
 export function getBootstrap(db: Database): Bootstrap {
@@ -244,7 +309,15 @@ function cardFromRow(db: Database, row: Row): Card {
     revision: Number(tag.revision),
   }));
   const assigneeIds = asRows(
-    db.query("SELECT participant_id FROM card_assignees WHERE card_id = ?").all(row.id),
+    db
+      .query(
+        `SELECT card_assignees.participant_id
+        FROM card_assignees
+        JOIN participants ON participants.id = card_assignees.participant_id
+        WHERE card_assignees.card_id = ?
+        ORDER BY participants.display_name COLLATE NOCASE`,
+      )
+      .all(row.id),
   ).map((assignee) => String(assignee.participant_id));
   return {
     id: String(row.id),
@@ -412,6 +485,23 @@ export function updateTag(
   };
 }
 
+export function deleteTag(
+  db: Database,
+  tagId: string,
+): { status: "ok"; boardId: string } | { status: "not_found" } {
+  const row = db.query("SELECT board_id FROM tags WHERE id = ?").get(tagId) as Row | null;
+  if (!row) return { status: "not_found" };
+  db.transaction(() => {
+    db.query(
+      `UPDATE cards
+      SET revision = revision + 1, updated_at = ?
+      WHERE id IN (SELECT card_id FROM card_tags WHERE label_id = ?)`,
+    ).run(now(), tagId);
+    db.query("DELETE FROM tags WHERE id = ?").run(tagId);
+  })();
+  return { status: "ok", boardId: String(row.board_id) };
+}
+
 export type UpdateCardTagsResult =
   | { status: "ok"; card: Card }
   | { status: "conflict"; card: Card }
@@ -447,6 +537,42 @@ export function updateCardTags(
     db.query("DELETE FROM card_tags WHERE card_id = ?").run(cardId);
     const assign = db.query("INSERT INTO card_tags (card_id, label_id) VALUES (?, ?)");
     for (const tagId of tagIds) assign.run(cardId, tagId);
+    db.query("UPDATE cards SET revision = revision + 1, updated_at = ? WHERE id = ?").run(
+      now(),
+      cardId,
+    );
+    const updated = getCard(db, cardId);
+    return updated ? { status: "ok", card: updated } : { status: "not_found" };
+  })();
+}
+
+export type UpdateCardAssigneesResult =
+  | { status: "ok"; card: Card }
+  | { status: "conflict"; card: Card }
+  | { status: "not_found" }
+  | { status: "invalid_participant" };
+
+export function updateCardAssignees(
+  db: Database,
+  cardId: string,
+  assigneeIds: string[],
+  revision: number,
+): UpdateCardAssigneesResult {
+  return db.transaction((): UpdateCardAssigneesResult => {
+    const current = getCard(db, cardId);
+    if (!current) return { status: "not_found" };
+    if (current.revision !== revision) return { status: "conflict", card: current };
+
+    for (const participantId of assigneeIds) {
+      const participant = db
+        .query("SELECT id FROM participants WHERE id = ? AND active = 1")
+        .get(participantId);
+      if (!participant) return { status: "invalid_participant" };
+    }
+
+    db.query("DELETE FROM card_assignees WHERE card_id = ?").run(cardId);
+    const assign = db.query("INSERT INTO card_assignees (card_id, participant_id) VALUES (?, ?)");
+    for (const participantId of assigneeIds) assign.run(cardId, participantId);
     db.query("UPDATE cards SET revision = revision + 1, updated_at = ? WHERE id = ?").run(
       now(),
       cardId,

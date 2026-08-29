@@ -493,6 +493,28 @@ a {
   line-height: 1.4;
 }
 
+.card-assignees {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.65rem;
+}
+
+.card-assignee {
+  display: inline-flex;
+  min-width: 21px;
+  min-height: 21px;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.4rem;
+  background: var(--sidebar);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.6rem;
+  font-weight: 720;
+}
+
 .tag-row,
 .drawer-tags {
   display: flex;
@@ -637,7 +659,8 @@ a {
 }
 
 .detail-section h3,
-.tag-section h3 {
+.tag-section h3,
+.assignee-section h3 {
   margin: 0 0 0.7rem;
   color: var(--muted);
   font-size: 0.65rem;
@@ -673,7 +696,8 @@ a {
   color: var(--muted);
 }
 
-.tag-section {
+.tag-section,
+.assignee-section {
   margin-top: 1.4rem;
 }
 
@@ -682,6 +706,64 @@ a {
   min-height: 24px;
   align-items: center;
   font-size: 0.75rem;
+}
+
+.drawer-assignees {
+  display: flex;
+  min-height: 24px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.person-badge {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0 0.45rem 0 0.25rem;
+  background: var(--sidebar);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.person-badge > i,
+.person-dot {
+  display: inline-grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  background: var(--ink);
+  border-radius: 50%;
+  color: var(--panel);
+  font-size: 0.55rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.person-badge--removable {
+  padding-right: 0.2rem;
+}
+
+.person-badge--removable button {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.person-badge--removable button:hover {
+  background: var(--panel-strong);
+  color: var(--ink);
 }
 
 .tag--removable {
@@ -823,7 +905,7 @@ a {
 
 .tag-manager-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 148px;
+  grid-template-columns: minmax(0, 1fr) 148px auto;
   align-items: center;
   gap: 0.55rem;
 }
@@ -835,7 +917,23 @@ a {
   gap: 0.55rem;
 }
 
-.tag-create-row {
+.person-manager-list {
+  display: grid;
+  gap: 0.55rem;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.person-manager-row,
+.person-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.tag-create-row,
+.person-create-row {
   margin-top: 0.8rem;
   padding-top: 0.8rem;
   border-top: 1px solid var(--line);
@@ -1017,13 +1115,57 @@ a {
   line-height: 1.55;
 }
 
+.settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-tab {
+  padding: 0.7rem 0.8rem;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 720;
+}
+
+.settings-tab:hover,
+.settings-tab:focus-visible {
+  background: var(--sidebar);
+  color: var(--ink);
+  outline: none;
+}
+
+.settings-tab--active {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+}
+
+.settings-panel {
+  min-height: 150px;
+  padding-top: 1.1rem;
+}
+
 .settings-section h3 {
-  margin: 1.15rem 0 0;
+  margin: 0 0 0.75rem;
   color: var(--muted);
   font-size: 0.68rem;
   font-weight: 750;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.settings-panel > .dialog-copy:first-child {
+  margin-top: 0;
+}
+
+.theme-toggle {
+  min-height: 58px;
+  padding: 0.8rem 1rem;
 }
 
 .trash-list {
@@ -1212,12 +1354,15 @@ a {
   }
 
   .tag-manager-row,
-  .tag-create-row {
+  .tag-create-row,
+  .person-manager-row,
+  .person-create-row {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .tag-manager-row .tag-name-input,
-  .tag-create-row .tag-name-input {
+  .tag-create-row .tag-name-input,
+  .person-create-row .tag-name-input {
     grid-column: 1 / -1;
   }
 }
