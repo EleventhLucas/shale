@@ -166,23 +166,99 @@ a {
   border-right: 1px solid var(--line);
 }
 
-.brand-row {
+.sidebar-footer {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: auto;
+  padding: 0.8rem;
+  border-top: 1px solid var(--line);
+}
+
+.sidebar-brand {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
-  height: 65px;
-  padding: 0 1.2rem;
-  border-bottom: 1px solid var(--line);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.24em;
+  gap: 0.5rem;
+  padding: 0.25rem;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.63rem;
+  font-weight: 650;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.sidebar-brand:hover,
+.sidebar-brand:focus-visible {
+  background: var(--panel-strong);
+  color: var(--ink);
+  outline: 1px solid var(--line);
+}
+
+.sidebar-brand code {
+  font-size: 0.59rem;
+}
+
+.sidebar-brand-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.sidebar-brand-copy strong {
+  color: var(--ink);
+  font-size: 0.7rem;
+}
+
+.sidebar-brand-copy span {
+  color: var(--faint);
+  font-size: 0.59rem;
 }
 
 .brand-mark {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
   object-fit: contain;
   opacity: 0.9;
+}
+
+.update-check {
+  width: 100%;
+  min-height: 30px;
+  padding: 0.35rem 0.55rem;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.65rem;
+  font-weight: 650;
+  text-align: left;
+}
+
+.update-check:hover:not(:disabled),
+.update-check:focus-visible {
+  background: var(--panel-strong);
+  border-color: var(--line-strong);
+  color: var(--ink);
+  outline: none;
+}
+
+.update-check:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.update-check--failed {
+  color: #b8544b;
+}
+
+.update-check--available {
+  color: #b87d26;
+}
+
+.update-check--current {
+  color: #4f8a62;
 }
 
 .board-nav-heading {
@@ -219,6 +295,9 @@ a {
 
 .board-list {
   display: grid;
+  min-height: 0;
+  flex: 1;
+  align-content: start;
   gap: 0.15rem;
   padding: 0 0.65rem 1rem;
   overflow-y: auto;

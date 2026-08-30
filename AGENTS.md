@@ -22,7 +22,8 @@ Never store passwords, access tokens, private keys, or other secrets in either a
 
 ## Privacy, Security, and Network Behavior
 
-- Do not add telemetry, analytics, automatic uploads, update checks, content logging, raw path logging, command-output logging, remote fonts, CDNs, or unrelated outbound requests.
+- The public Shale repository URL may be committed, displayed in-app, and queried for user-triggered update checks.
+- Do not add telemetry, analytics, automatic uploads, content logging, raw path logging, command-output logging, remote fonts, CDNs, or unrelated outbound requests.
 - Do not commit secrets, PII, private configuration, personal paths, copied transcripts, runtime databases, or backups.
 - Treat the configured shared password as a secret. Examples must use placeholders and tests must use disposable values.
 - Public-read behavior is intentional, but mutations, backup downloads, trash purges, and sandbox reset must enforce the edit session.

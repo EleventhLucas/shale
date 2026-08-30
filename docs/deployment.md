@@ -38,6 +38,9 @@ services:
     image: shale:local
     build:
       context: .
+      args:
+        SHALE_BUILD_COMMIT: ${SHALE_BUILD_COMMIT:-unknown}
+        SHALE_BUILD_DATE: ${SHALE_BUILD_DATE:-unknown}
     restart: unless-stopped
     ports:
       - "127.0.0.1:3002:3000"
@@ -61,12 +64,22 @@ volumes:
 
 Create `.secrets/shale_password` with restrictive file permissions before starting the service. The `.secrets` directory is ignored by Git. Remove the password environment entry and the `secrets` sections when intentionally deploying a publicly editable board.
 
-Build and start the service from the repository root:
+Shale embeds the source commit and its date into the web build. Supply both build arguments when using Compose so the sidebar reports the deployed revision:
 
 ```sh
-docker compose up --detach --build
+SHALE_BUILD_COMMIT="$(git rev-parse HEAD)" \
+SHALE_BUILD_DATE="$(git show -s --format=%cs HEAD)" \
+docker compose build
+```
+
+Start the service and check it from the repository root:
+
+```sh
+docker compose up --detach
 curl --fail http://127.0.0.1:3002/healthz
 ```
+
+Native `bun run build` commands derive the same values from the local Git checkout. Container builds without the build arguments display `unknown` and report a failed update check instead of guessing.
 
 The current Docker image targets Linux AMD64. Confirm the deployment host has a compatible architecture before building it.
 

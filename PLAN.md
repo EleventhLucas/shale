@@ -88,7 +88,7 @@ Build Shale as a minimal, open-source kanban server for small trusted groups.
   - Support `SHALE_PORT`, `SHALE_DATA_DIR`, `SHALE_PASSWORD`/`SHALE_PASSWORD_FILE`, backup interval/retention, and an optional public-origin setting.
 - Publish versioned Linux x64 container images manually to the configured registry. Do not promise arm64, AppImage, standalone Web hosting, or standalone binaries in 0.1.0.
 - Docker is not currently available on the planning machine. Document it as a release prerequisite and perform final container validation on a Linux x64 Docker host.
-- Add no telemetry, analytics, update checks, request/content logging, remote fonts, CDNs, or outbound background network activity.
+- Add no telemetry, analytics, request/content logging, remote fonts, CDNs, or outbound background network activity. The source footer may query the public Shale repository for updates only after an explicit button click; it must never download or install an update.
 
 ## Test and Acceptance Plan
 

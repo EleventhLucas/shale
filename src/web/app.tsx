@@ -57,7 +57,9 @@ import type {
 import { boardExportSchema, defaultTagColor } from "../shared/contracts";
 import { ApiError, api } from "./api";
 import { cardMatchesBoardFilters } from "./board-filters";
+import { buildInfo } from "./build-info";
 import { Button } from "./components/button";
+import { checkForUpdates, shaleRepositoryUrl, type UpdateCheckStatus } from "./update-check";
 
 const participantStorageKey = "shale.participant";
 const sidebarStorageKey = "shale.sidebar";
@@ -78,6 +80,51 @@ function tagColorStyle(color: TagColor): CSSProperties {
 
 function personColorStyle(color: TagColor): CSSProperties {
   return { "--person-color": color } as CSSProperties;
+}
+
+const updateStatusLabels: Record<UpdateCheckStatus, string> = {
+  idle: "Check for updates",
+  checking: "Checking…",
+  failed: "Failed to fetch ❌",
+  available: "An update is available! 🚧",
+  current: "No updates. ✅",
+};
+
+function SidebarBrand() {
+  const [updateStatus, setUpdateStatus] = useState<UpdateCheckStatus>("idle");
+
+  async function runUpdateCheck(): Promise<void> {
+    setUpdateStatus("checking");
+    setUpdateStatus(await checkForUpdates(buildInfo.commit));
+  }
+
+  return (
+    <footer className="sidebar-footer">
+      <a
+        className="sidebar-brand"
+        href={shaleRepositoryUrl}
+        target="_blank"
+        rel="noreferrer noopener"
+        title="Open the Shale source repository"
+      >
+        <img className="brand-mark" src={shaleIcon} alt="" />
+        <span className="sidebar-brand-copy">
+          <strong>Shale</strong>
+          <code>{buildInfo.shortCommit}</code>
+          <span>({buildInfo.date})</span>
+        </span>
+      </a>
+      <button
+        className={`update-check update-check--${updateStatus}`}
+        type="button"
+        disabled={updateStatus === "checking"}
+        aria-live="polite"
+        onClick={() => void runUpdateCheck()}
+      >
+        {updateStatusLabels[updateStatus]}
+      </button>
+    </footer>
+  );
 }
 
 function PersonAvatar({ person, className = "" }: { person: Participant; className?: string }) {
@@ -557,10 +604,6 @@ function BoardPage({
   return (
     <div className={`app-shell ${navOpen ? "app-shell--nav" : ""}`}>
       <aside className="sidebar" aria-label="Board navigation">
-        <div className="brand-row">
-          <img className="brand-mark" src={shaleIcon} alt="" />
-          <span>SHALE</span>
-        </div>
         <div className="board-nav-heading">
           <span>Boards</span>
           {canEdit && (
@@ -588,6 +631,7 @@ function BoardPage({
             </a>
           ))}
         </nav>
+        <SidebarBrand />
       </aside>
 
       <input

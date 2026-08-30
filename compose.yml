@@ -3,6 +3,9 @@ services:
     image: shale:0.1.0
     build:
       context: .
+      args:
+        SHALE_BUILD_COMMIT: ${SHALE_BUILD_COMMIT:-unknown}
+        SHALE_BUILD_DATE: ${SHALE_BUILD_DATE:-unknown}
     ports:
       - "3000:3000"
     environment:
