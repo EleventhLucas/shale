@@ -10,44 +10,6 @@
       "env": {
         "SHALE_DATA_DIR": "${workspaceFolder}/.data"
       }
-    },
-    {
-      "name": "Shale: Server",
-      "type": "node-terminal",
-      "request": "launch",
-      "command": "bun run dev:server",
-      "cwd": "${workspaceFolder}",
-      "env": {
-        "SHALE_DATA_DIR": "${workspaceFolder}/.data"
-      }
-    },
-    {
-      "name": "Shale: Web UI",
-      "type": "node-terminal",
-      "request": "launch",
-      "command": "bun run dev:web",
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "name": "Shale: Browser",
-      "type": "pwa-chrome",
-      "request": "launch",
-      "runtimeExecutable": "brave-origin",
-      "url": "http://localhost:5173",
-      "webRoot": "${workspaceFolder}/src/web"
-    },
-    {
-      "name": "Shale: Targeted tests",
-      "type": "node-terminal",
-      "request": "launch",
-      "command": "bun run test -- --watch",
-      "cwd": "${workspaceFolder}"
-    }
-  ],
-  "compounds": [
-    {
-      "name": "Shale: Server and browser",
-      "configurations": ["Shale: Server", "Shale: Web UI", "Shale: Browser"]
     }
   ]
 }
