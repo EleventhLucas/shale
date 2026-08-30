@@ -593,23 +593,28 @@ a {
   outline: 1px solid var(--line-strong);
 }
 
-.column--add {
+.column.column--add {
+  width: 76px;
+  min-width: 76px;
   min-height: 76px;
   align-items: center;
   justify-content: center;
-  flex-direction: row;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.65rem;
   background: transparent;
   border-style: dashed;
   color: var(--muted);
   cursor: pointer;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   font-weight: 680;
+  line-height: 1.2;
+  text-align: center;
 }
 
-.column--add:hover,
-.column--add:focus-visible {
+.column.column--add:hover,
+.column.column--add:focus-visible {
   border-color: var(--line-strong);
   color: var(--ink);
   outline: 1px solid var(--line-strong);
@@ -646,6 +651,10 @@ a {
 .card-tile--dragging {
   opacity: 0.35;
   cursor: grabbing;
+}
+
+.card-tile--readonly {
+  cursor: default;
 }
 
 .card-preview {

@@ -60,6 +60,8 @@ import { cardMatchesBoardFilters } from "./board-filters";
 import { Button } from "./components/button";
 
 const participantStorageKey = "shale.participant";
+const sidebarStorageKey = "shale.sidebar";
+const boardScrollStoragePrefix = "shale.board-scroll.";
 const themeStorageKey = "shale.theme";
 const tagColorOptions: Array<{ value: TagColor; label: string }> = [
   { value: defaultTagColor, label: "Gray" },
@@ -219,7 +221,6 @@ export function App() {
   );
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [identityOpen, setIdentityOpen] = useState(false);
-  const session = useQuery({ queryKey: ["session"], queryFn: api.session });
   const bootstrap = useQuery({ queryKey: ["bootstrap"], queryFn: api.bootstrap });
 
   function selectParticipant(id: string): void {
@@ -232,14 +233,6 @@ export function App() {
     (participant) => participant.id === participantId && participant.active,
   );
   const boards = bootstrap.data?.workspaces.flatMap((workspace) => workspace.boards) ?? [];
-
-  function requestEditing(): boolean {
-    if (!session.data?.unlocked) {
-      setUnlockOpen(true);
-      return false;
-    }
-    return true;
-  }
 
   return (
     <BrowserRouter>
@@ -263,7 +256,6 @@ export function App() {
           element={
             <BoardPage
               participant={activeParticipant}
-              requestEditing={requestEditing}
               theme={theme}
               setTheme={setTheme}
               openUnlock={() => setUnlockOpen(true)}
@@ -276,7 +268,6 @@ export function App() {
           element={
             <BoardPage
               participant={activeParticipant}
-              requestEditing={requestEditing}
               theme={theme}
               setTheme={setTheme}
               openUnlock={() => setUnlockOpen(true)}
@@ -289,7 +280,6 @@ export function App() {
           element={
             <BoardPage
               participant={activeParticipant}
-              requestEditing={requestEditing}
               theme={theme}
               setTheme={setTheme}
               openUnlock={() => setUnlockOpen(true)}
@@ -302,7 +292,6 @@ export function App() {
           element={
             <BoardPage
               participant={activeParticipant}
-              requestEditing={requestEditing}
               theme={theme}
               setTheme={setTheme}
               openUnlock={() => setUnlockOpen(true)}
@@ -335,14 +324,12 @@ export function App() {
 
 function BoardPage({
   participant,
-  requestEditing,
   theme,
   setTheme,
   openUnlock,
   openIdentity,
 }: {
   participant?: Participant;
-  requestEditing: () => boolean;
   theme: "light" | "dark";
   setTheme: (value: "light" | "dark") => void;
   openUnlock: () => void;
@@ -352,7 +339,9 @@ function BoardPage({
   const boardReference = legacyBoardId ?? boardSlug;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [navOpen, setNavOpen] = useState(true);
+  const [navOpen, setNavOpen] = useState(
+    () => localStorage.getItem(sidebarStorageKey) !== "closed",
+  );
   const [search, setSearch] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
@@ -368,6 +357,10 @@ function BoardPage({
   const importInput = useRef<HTMLInputElement>(null);
   const [activeCardId, setActiveCardId] = useState<string>();
   const [moveError, setMoveError] = useState<string>();
+  const boardScrollRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    localStorage.setItem(sidebarStorageKey, navOpen ? "open" : "closed");
+  }, [navOpen]);
   useEffect(() => {
     if (!boardReference) return;
     setSearch("");
@@ -384,6 +377,24 @@ function BoardPage({
     queryKey: ["board", boardReference],
     queryFn: () => api.board(boardReference),
   });
+  const canEdit = Boolean(session.data?.unlocked);
+  const boardId = board.data?.board.id;
+  useEffect(() => {
+    const scroller = boardScrollRef.current;
+    if (!scroller || !boardId) return;
+    const restore = () => {
+      const stored = Number.parseFloat(
+        localStorage.getItem(`${boardScrollStoragePrefix}${boardId}`) ?? "",
+      );
+      if (Number.isFinite(stored) && stored >= 0) scroller.scrollLeft = stored;
+    };
+    if (!canEdit) {
+      restore();
+      return;
+    }
+    const frame = window.requestAnimationFrame(restore);
+    return () => window.cancelAnimationFrame(frame);
+  }, [boardId, canEdit]);
   const lock = useMutation({
     mutationFn: api.lock,
     onSuccess: (data) => queryClient.setQueryData(["session"], data),
@@ -486,7 +497,7 @@ function BoardPage({
 
   function requestMove(card: Card, targetColumnId: string, targetPosition: number): void {
     if (card.columnId === targetColumnId && card.position === targetPosition) return;
-    if (!requestEditing()) return;
+    if (!canEdit) return;
     move.mutate({ card, targetColumnId, targetPosition });
   }
 
@@ -494,7 +505,7 @@ function BoardPage({
     const card = board.data?.columns
       .flatMap((column) => column.cards)
       .find((item) => item.id === String(event.active.id));
-    if (!card || !requestEditing()) return;
+    if (!card || !canEdit) return;
     setActiveCardId(card.id);
   }
 
@@ -552,16 +563,16 @@ function BoardPage({
         </div>
         <div className="board-nav-heading">
           <span>Boards</span>
-          <button
-            type="button"
-            aria-label="Create board"
-            title="Create board"
-            onClick={() => {
-              if (requestEditing()) setCreateBoardOpen(true);
-            }}
-          >
-            <Plus size={15} />
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              aria-label="Create board"
+              title="Create board"
+              onClick={() => setCreateBoardOpen(true)}
+            >
+              <Plus size={15} />
+            </button>
+          )}
         </div>
         <nav className="board-list">
           {boards.map((item) => (
@@ -673,7 +684,19 @@ function BoardPage({
           onDragCancel={() => setActiveCardId(undefined)}
           onDragEnd={handleDragEnd}
         >
-          <section className="board-scroll" aria-label="Board columns">
+          <section
+            className="board-scroll"
+            aria-label="Board columns"
+            ref={boardScrollRef}
+            onScroll={(event) => {
+              if (boardId) {
+                localStorage.setItem(
+                  `${boardScrollStoragePrefix}${boardId}`,
+                  String(event.currentTarget.scrollLeft),
+                );
+              }
+            }}
+          >
             {board.data.columns.map((column) => (
               <BoardColumn
                 key={column.id}
@@ -683,31 +706,27 @@ function BoardPage({
                 tagFilters={tagFilters}
                 personFilters={personFilters}
                 boardKey={boardKey}
-                canEdit={Boolean(session.data?.unlocked)}
-                requestEditing={requestEditing}
+                canEdit={canEdit}
                 onOpen={(card) =>
                   navigate(`${canonicalBoardPath}/c/${encodeURIComponent(card.id)}`)
                 }
-                onCreate={() => {
-                  if (requestEditing()) setCreateCardColumn(column);
-                }}
+                onCreate={() => setCreateCardColumn(column)}
                 onDelete={() => {
-                  if (!requestEditing()) return;
                   if (column.cards.length > 0) setDeleteColumn(column);
                   else removeColumn.mutate(column);
                 }}
               />
             ))}
-            <button
-              className="column column--add"
-              type="button"
-              onClick={() => {
-                if (requestEditing()) setCreateColumnOpen(true);
-              }}
-            >
-              <Plus size={19} />
-              <span>Add column</span>
-            </button>
+            {canEdit && (
+              <button
+                className="column column--add"
+                type="button"
+                onClick={() => setCreateColumnOpen(true)}
+              >
+                <Plus size={19} />
+                <span>Add column</span>
+              </button>
+            )}
           </section>
           <DragOverlay dropAnimation={null}>
             {activeCard ? <CardPreview card={activeCard} people={people} /> : null}
@@ -723,7 +742,7 @@ function BoardPage({
           tags={board.data.tags}
           people={people}
           participant={participant}
-          requestEditing={requestEditing}
+          canEdit={canEdit}
           openIdentity={openIdentity}
           onClose={() => navigate(canonicalBoardPath)}
           onTrashed={() => navigate(canonicalBoardPath)}
@@ -736,7 +755,7 @@ function BoardPage({
           boardId={board.data.board.id}
           boardKey={boardKey}
           people={people}
-          requestEditing={requestEditing}
+          canEdit={canEdit}
           theme={theme}
           setTheme={setTheme}
           boardFileError={boardFileError}
@@ -946,12 +965,10 @@ function ColumnTitleInput({
   column,
   boardKey,
   canEdit,
-  requestEditing,
 }: {
   column: Column;
   boardKey: string[];
   canEdit: boolean;
-  requestEditing: () => boolean;
 }) {
   const queryClient = useQueryClient();
   const [title, setTitle] = useState(column.title);
@@ -982,9 +999,6 @@ function ColumnTitleInput({
       maxLength={200}
       aria-label={`Rename ${column.title} column`}
       readOnly={!canEdit}
-      onFocus={() => {
-        if (!canEdit) requestEditing();
-      }}
       onBlur={persist}
       onChange={(event) => setTitle(event.target.value)}
     />
@@ -999,7 +1013,6 @@ function BoardColumn({
   personFilters,
   boardKey,
   canEdit,
-  requestEditing,
   onOpen,
   onCreate,
   onDelete,
@@ -1011,7 +1024,6 @@ function BoardColumn({
   personFilters: string[];
   boardKey: string[];
   canEdit: boolean;
-  requestEditing: () => boolean;
   onOpen: (card: Card) => void;
   onCreate: () => void;
   onDelete: () => void;
@@ -1027,20 +1039,19 @@ function BoardColumn({
   return (
     <div className={`column ${isOver ? "column--over" : ""}`} ref={setNodeRef}>
       <div className="column-heading">
-        <ColumnTitleInput
-          column={column}
-          boardKey={boardKey}
-          canEdit={canEdit}
-          requestEditing={requestEditing}
-        />
+        <ColumnTitleInput column={column} boardKey={boardKey} canEdit={canEdit} />
         <div className="column-heading-actions">
           <span>{cards.length}</span>
-          <button type="button" aria-label={`Add card to ${column.title}`} onClick={onCreate}>
-            <Plus size={14} />
-          </button>
-          <button type="button" aria-label={`Delete ${column.title}`} onClick={onDelete}>
-            <Trash2 size={13} />
-          </button>
+          {canEdit && (
+            <>
+              <button type="button" aria-label={`Add card to ${column.title}`} onClick={onCreate}>
+                <Plus size={14} />
+              </button>
+              <button type="button" aria-label={`Delete ${column.title}`} onClick={onDelete}>
+                <Trash2 size={13} />
+              </button>
+            </>
+          )}
         </div>
       </div>
       <SortableContext items={cards.map((card) => card.id)} strategy={verticalListSortingStrategy}>
@@ -1050,6 +1061,7 @@ function BoardColumn({
               key={card.id}
               card={card}
               people={people}
+              canEdit={canEdit}
               onOpen={() => onOpen(card)}
             />
           ))}
@@ -1063,26 +1075,33 @@ function BoardColumn({
 function SortableCardTile({
   card,
   people,
+  canEdit,
   onOpen,
 }: {
   card: Card;
   people: Participant[];
+  canEdit: boolean;
   onOpen: () => void;
 }) {
   const { attributes, isDragging, listeners, setNodeRef, transform } = useSortable({
     id: card.id,
     data: { type: "card", columnId: card.columnId },
+    disabled: !canEdit,
   });
   const sortableAttributes = { ...attributes, role: undefined };
 
   return (
     <article
-      className={`card-tile ${isDragging ? "card-tile--dragging" : ""}`}
+      className={`card-tile ${isDragging ? "card-tile--dragging" : ""} ${
+        canEdit ? "" : "card-tile--readonly"
+      }`}
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform) }}
       {...sortableAttributes}
       {...listeners}
-      aria-label={`${card.title}. Press Space to pick up and move this card.`}
+      aria-label={
+        canEdit ? `${card.title}. Press Space to pick up and move this card.` : card.title
+      }
     >
       <button className="card-open" type="button" onClick={onOpen}>
         <CardContent card={card} people={people} />
@@ -1133,7 +1152,7 @@ function CardDrawer({
   tags,
   people,
   participant,
-  requestEditing,
+  canEdit,
   openIdentity,
   onClose,
   onTrashed,
@@ -1143,7 +1162,7 @@ function CardDrawer({
   tags: Tag[];
   people: Participant[];
   participant?: Participant;
-  requestEditing: () => boolean;
+  canEdit: boolean;
   openIdentity: () => void;
   onClose: () => void;
   onTrashed: () => void;
@@ -1160,6 +1179,12 @@ function CardDrawer({
       setDescription(card?.description ?? "");
     }
   }, [card, editing]);
+  useEffect(() => {
+    if (!canEdit) {
+      setEditing(false);
+      setConflict(undefined);
+    }
+  }, [canEdit]);
 
   const save = useMutation<Card, Error, boolean>({
     mutationFn: (force = false) => {
@@ -1261,35 +1286,28 @@ function CardDrawer({
                       <Check size={15} /> {save.isPending ? "Saving…" : "Save"}
                     </Button>
                   </>
-                ) : (
+                ) : canEdit ? (
                   <Button
                     type="button"
                     variant="quiet"
                     size="small"
                     onClick={() => {
-                      if (requestEditing()) {
-                        save.reset();
-                        setEditing(true);
-                      }
+                      save.reset();
+                      setEditing(true);
                     }}
                   >
                     Edit
                   </Button>
-                )}
+                ) : null}
               </div>
             </div>
-            <CardTagPicker
-              card={card}
-              tags={tags}
-              boardKey={boardKey}
-              requestEditing={requestEditing}
-            />
+            <CardTagPicker card={card} tags={tags} boardKey={boardKey} canEdit={canEdit} />
             <CardAssigneePicker
               card={card}
               people={people}
               participant={participant}
               boardKey={boardKey}
-              requestEditing={requestEditing}
+              canEdit={canEdit}
               openIdentity={openIdentity}
             />
             <section className="detail-section">
@@ -1347,20 +1365,20 @@ function CardDrawer({
               </div>
             )}
           </form>
-          <div className="drawer-danger-row">
-            <Button
-              type="button"
-              variant="quiet"
-              size="small"
-              disabled={trashCard.isPending}
-              onClick={() => {
-                if (requestEditing()) trashCard.mutate();
-              }}
-            >
-              <Trash2 size={15} /> {trashCard.isPending ? "Moving…" : "Move card to Trash"}
-            </Button>
-            {trashCard.error && <p className="form-error">{trashCard.error.message}</p>}
-          </div>
+          {canEdit && (
+            <div className="drawer-danger-row">
+              <Button
+                type="button"
+                variant="quiet"
+                size="small"
+                disabled={trashCard.isPending}
+                onClick={() => trashCard.mutate()}
+              >
+                <Trash2 size={15} /> {trashCard.isPending ? "Moving…" : "Move card to Trash"}
+              </Button>
+              {trashCard.error && <p className="form-error">{trashCard.error.message}</p>}
+            </div>
+          )}
         </div>
       </aside>
     </div>
@@ -1371,12 +1389,12 @@ function CardTagPicker({
   card,
   tags,
   boardKey,
-  requestEditing,
+  canEdit,
 }: {
   card: Card;
   tags: Tag[];
   boardKey: string[];
-  requestEditing: () => boolean;
+  canEdit: boolean;
 }) {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
@@ -1394,7 +1412,7 @@ function CardTagPicker({
   );
 
   function updateTags(tagIds: string[]): void {
-    if (!requestEditing()) return;
+    if (!canEdit) return;
     assign.mutate(tagIds);
   }
 
@@ -1403,59 +1421,69 @@ function CardTagPicker({
       <h3>Tags</h3>
       <div className="drawer-tags">
         {card.tags.map((tag) => (
-          <span className="tag tag--removable" style={tagColorStyle(tag.color)} key={tag.id}>
+          <span
+            className={canEdit ? "tag tag--removable" : "tag"}
+            style={tagColorStyle(tag.color)}
+            key={tag.id}
+          >
             {tag.name}
-            <button
-              type="button"
-              aria-label={`Remove ${tag.name}`}
-              disabled={assign.isPending}
-              onClick={() =>
-                updateTags(card.tags.filter((item) => item.id !== tag.id).map((item) => item.id))
-              }
-            >
-              <X size={11} />
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                aria-label={`Remove ${tag.name}`}
+                disabled={assign.isPending}
+                onClick={() =>
+                  updateTags(card.tags.filter((item) => item.id !== tag.id).map((item) => item.id))
+                }
+              >
+                <X size={11} />
+              </button>
+            )}
           </span>
         ))}
-        <details className="tag-picker">
-          <summary>
-            <Plus size={13} /> Add tag
-          </summary>
-          <div className="tag-picker-menu">
-            <input
-              value={query}
-              placeholder="Search tags"
-              aria-label="Search available tags"
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") event.preventDefault();
-              }}
-            />
-            <div className="tag-picker-options">
-              {available.map((tag) => (
-                <button
-                  type="button"
-                  key={tag.id}
-                  disabled={assign.isPending}
-                  onClick={(event) => {
-                    updateTags([...card.tags.map((item) => item.id), tag.id]);
-                    setQuery("");
-                    const details = event.currentTarget.closest("details");
-                    if (details) details.open = false;
-                  }}
-                >
-                  <i
-                    className="tag-color-dot"
-                    style={tagColorStyle(tag.color)}
-                    aria-hidden="true"
-                  />
-                  {tag.name}
-                </button>
-              ))}
-              {available.length === 0 && <span className="tag-picker-empty">No matching tags</span>}
+        {canEdit && (
+          <details className="tag-picker">
+            <summary>
+              <Plus size={13} /> Add tag
+            </summary>
+            <div className="tag-picker-menu">
+              <input
+                value={query}
+                placeholder="Search tags"
+                aria-label="Search available tags"
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.preventDefault();
+                }}
+              />
+              <div className="tag-picker-options">
+                {available.map((tag) => (
+                  <button
+                    type="button"
+                    key={tag.id}
+                    disabled={assign.isPending}
+                    onClick={(event) => {
+                      updateTags([...card.tags.map((item) => item.id), tag.id]);
+                      setQuery("");
+                      const details = event.currentTarget.closest("details");
+                      if (details) details.open = false;
+                    }}
+                  >
+                    <i
+                      className="tag-color-dot"
+                      style={tagColorStyle(tag.color)}
+                      aria-hidden="true"
+                    />
+                    {tag.name}
+                  </button>
+                ))}
+                {available.length === 0 && (
+                  <span className="tag-picker-empty">No matching tags</span>
+                )}
+              </div>
             </div>
-          </div>
-        </details>
+          </details>
+        )}
       </div>
       {assign.error && <p className="form-error">{assign.error.message}</p>}
     </section>
@@ -1467,14 +1495,14 @@ function CardAssigneePicker({
   people,
   participant,
   boardKey,
-  requestEditing,
+  canEdit,
   openIdentity,
 }: {
   card: Card;
   people: Participant[];
   participant?: Participant;
   boardKey: string[];
-  requestEditing: () => boolean;
+  canEdit: boolean;
   openIdentity: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -1496,7 +1524,7 @@ function CardAssigneePicker({
   );
 
   function updateAssignees(assigneeIds: string[]): void {
-    if (!requestEditing()) return;
+    if (!canEdit) return;
     assign.mutate(assigneeIds);
   }
 
@@ -1515,22 +1543,27 @@ function CardAssigneePicker({
       <h3>People</h3>
       <div className="drawer-assignees">
         {assignedPeople.map((person) => (
-          <span className="person-badge person-badge--removable" key={person.id}>
+          <span
+            className={canEdit ? "person-badge person-badge--removable" : "person-badge"}
+            key={person.id}
+          >
             <PersonAvatar person={person} />
             {person.displayName}
-            <button
-              type="button"
-              aria-label={`Unassign ${person.displayName}`}
-              disabled={assign.isPending}
-              onClick={() =>
-                updateAssignees(card.assigneeIds.filter((personId) => personId !== person.id))
-              }
-            >
-              <X size={11} />
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                aria-label={`Unassign ${person.displayName}`}
+                disabled={assign.isPending}
+                onClick={() =>
+                  updateAssignees(card.assigneeIds.filter((personId) => personId !== person.id))
+                }
+              >
+                <X size={11} />
+              </button>
+            )}
           </span>
         ))}
-        {(!participant || !assigned.has(participant.id)) && (
+        {canEdit && (!participant || !assigned.has(participant.id)) && (
           <Button
             variant="quiet"
             size="small"
@@ -1541,43 +1574,45 @@ function CardAssigneePicker({
             <CircleUserRound size={14} /> Add me
           </Button>
         )}
-        <details className="tag-picker">
-          <summary>
-            <Plus size={13} /> Add person
-          </summary>
-          <div className="tag-picker-menu">
-            <input
-              value={query}
-              placeholder="Search people"
-              aria-label="Search available people"
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") event.preventDefault();
-              }}
-            />
-            <div className="tag-picker-options">
-              {available.map((person) => (
-                <button
-                  type="button"
-                  key={person.id}
-                  disabled={assign.isPending}
-                  onClick={(event) => {
-                    updateAssignees([...card.assigneeIds, person.id]);
-                    setQuery("");
-                    const details = event.currentTarget.closest("details");
-                    if (details) details.open = false;
-                  }}
-                >
-                  <PersonAvatar person={person} className="person-dot" />
-                  {person.displayName}
-                </button>
-              ))}
-              {available.length === 0 && (
-                <span className="tag-picker-empty">No matching people</span>
-              )}
+        {canEdit && (
+          <details className="tag-picker">
+            <summary>
+              <Plus size={13} /> Add person
+            </summary>
+            <div className="tag-picker-menu">
+              <input
+                value={query}
+                placeholder="Search people"
+                aria-label="Search available people"
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.preventDefault();
+                }}
+              />
+              <div className="tag-picker-options">
+                {available.map((person) => (
+                  <button
+                    type="button"
+                    key={person.id}
+                    disabled={assign.isPending}
+                    onClick={(event) => {
+                      updateAssignees([...card.assigneeIds, person.id]);
+                      setQuery("");
+                      const details = event.currentTarget.closest("details");
+                      if (details) details.open = false;
+                    }}
+                  >
+                    <PersonAvatar person={person} className="person-dot" />
+                    {person.displayName}
+                  </button>
+                ))}
+                {available.length === 0 && (
+                  <span className="tag-picker-empty">No matching people</span>
+                )}
+              </div>
             </div>
-          </div>
-        </details>
+          </details>
+        )}
       </div>
       {assign.error && <p className="form-error">{assign.error.message}</p>}
     </section>
@@ -2146,7 +2181,7 @@ function SettingsDialog({
   people,
   boardId,
   boardKey,
-  requestEditing,
+  canEdit,
   theme,
   setTheme,
   boardFileError,
@@ -2162,7 +2197,7 @@ function SettingsDialog({
   people: Participant[];
   boardId: string;
   boardKey: string[];
-  requestEditing: () => boolean;
+  canEdit: boolean;
   theme: "light" | "dark";
   setTheme: (value: "light" | "dark") => void;
   boardFileError?: string;
@@ -2178,6 +2213,9 @@ function SettingsDialog({
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState<TagColor>(defaultTagColor);
   const [newPersonName, setNewPersonName] = useState("");
+  useEffect(() => {
+    if (!canEdit) setSection("appearance");
+  }, [canEdit]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: boardKey });
   const create = useMutation({
@@ -2213,48 +2251,48 @@ function SettingsDialog({
         >
           Appearance
         </button>
-        <button
-          id="settings-tags-tab"
-          className={section === "tags" ? "settings-tab settings-tab--active" : "settings-tab"}
-          type="button"
-          role="tab"
-          aria-selected={section === "tags"}
-          aria-controls="settings-tags-panel"
-          onClick={() => {
-            if (requestEditing()) setSection("tags");
-          }}
-        >
-          Tags
-        </button>
-        <button
-          id="settings-people-tab"
-          className={section === "people" ? "settings-tab settings-tab--active" : "settings-tab"}
-          type="button"
-          role="tab"
-          aria-selected={section === "people"}
-          aria-controls="settings-people-panel"
-          onClick={() => {
-            if (requestEditing()) setSection("people");
-          }}
-        >
-          Persons
-        </button>
-        <button
-          id="settings-misc-tab"
-          className={section === "misc" ? "settings-tab settings-tab--active" : "settings-tab"}
-          type="button"
-          role="tab"
-          aria-selected={section === "misc"}
-          aria-controls="settings-misc-panel"
-          onClick={() => {
-            if (requestEditing()) setSection("misc");
-          }}
-        >
-          Misc.
-        </button>
+        {canEdit && (
+          <>
+            <button
+              id="settings-tags-tab"
+              className={section === "tags" ? "settings-tab settings-tab--active" : "settings-tab"}
+              type="button"
+              role="tab"
+              aria-selected={section === "tags"}
+              aria-controls="settings-tags-panel"
+              onClick={() => setSection("tags")}
+            >
+              Tags
+            </button>
+            <button
+              id="settings-people-tab"
+              className={
+                section === "people" ? "settings-tab settings-tab--active" : "settings-tab"
+              }
+              type="button"
+              role="tab"
+              aria-selected={section === "people"}
+              aria-controls="settings-people-panel"
+              onClick={() => setSection("people")}
+            >
+              Persons
+            </button>
+            <button
+              id="settings-misc-tab"
+              className={section === "misc" ? "settings-tab settings-tab--active" : "settings-tab"}
+              type="button"
+              role="tab"
+              aria-selected={section === "misc"}
+              aria-controls="settings-misc-panel"
+              onClick={() => setSection("misc")}
+            >
+              Misc.
+            </button>
+          </>
+        )}
       </div>
 
-      {section === "appearance" ? (
+      {section === "appearance" || !canEdit ? (
         <section
           className="settings-section settings-panel"
           id="settings-appearance-panel"
